@@ -1,0 +1,6 @@
+# Real configs live outside the repo. Never commit tokens.
+2fado.conf
+*.conf
+!/etc/
+etc/*.conf
+!etc/*.example
