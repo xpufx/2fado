@@ -4,3 +4,6 @@
 !/etc/
 etc/*.conf
 !etc/*.example
+# Built binaries stay out; `make build`.
+bin/*
+!bin/.gitignore

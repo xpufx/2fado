@@ -18,8 +18,10 @@ commands execute as you. Root execution (`target_user`) is implemented but
 parked: inert unless deliberately launched as root.
 
 ```
-bin/2fado    agent client: 2fado run -- <argv...> | approve|deny <id>
-bin/2fadod   privileged daemon: policy, pager, verdicts, execution, audit
+go/          Go module (stdlib only): single `2fado` binary —
+             `daemon | run -- <argv...> | approve|deny <id>`
+             typed protocol, service/transport split (MCP fork kept open)
+bin/         build output (`make build`, gitignored)
 etc/         2fado.conf.example (__TELEGRAM_BOT_TOKEN__ / __TELEGRAM_USER_ID__),
              policy.json.example, 2fadod.service.example
 docs/spec.md            general spec + flow diagram (the web-scale version)
@@ -33,12 +35,12 @@ docs/poc.md             runbook: try the PoC in two terminals, no root needed
 ## Try it (no root, no token)
 
 ```sh
-export FADO_SOCKET=/tmp/2fado-$USER.sock FADO_STATE_DIR=/tmp/2fado-$USER
-export FADO_CONF=$PWD/etc/2fado.conf.example
-./bin/2fadod &                                  # pager=stdout in this mode
+make build
+./bin/2fado daemon &                             # pager=stdout in this mode
 ./bin/2fado run -- /bin/echo hi                 # terminal 1: waits
 ./bin/2fado approve <request-id>                # terminal 2: the human
 ```
+(FADO_SOCKET/FADO_STATE_DIR/FADO_CONF env as in docs/poc.md.)
 
 Paste a bot token + your Telegram id into the config and terminal 2
 becomes your phone (outbound long-poll, no open ports).

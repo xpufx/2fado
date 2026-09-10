@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/2fadod
+ExecStart=/usr/local/bin/2fado daemon
 Environment=2FADO_CONF=/etc/2fado/2fado.conf
 Restart=on-failure
 # Hardening to tighten later: ProtectSystem=strict, PrivateTmp=yes, ...
