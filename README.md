@@ -11,11 +11,12 @@ every path: deny, timeout, error, or a phone left untouched.
 
 ## Status: working PoC
 
-Live and ringing: daemon + client + Telegram pager, stdlib-only Python,
-verified end to end (approve-by-phone, deny-by-phone, timeout, sender
-allowlist, one-time tokens, audit log). Runs unprivileged — approved
-commands execute as you. Root execution (`target_user`) is implemented but
-parked: inert unless deliberately launched as root.
+Live and ringing: single Go binary (`2fado daemon | run | approve|deny`),
+stdlib-only, Telegram pager, verified end to end (approve-by-phone,
+deny-by-phone, timeout, sender allowlist, one-time tokens, audit log).
+Runs unprivileged — approved commands execute as you. Root execution
+(`target_user`) is implemented but parked: inert unless deliberately
+launched as root.
 
 ```
 go/          Go module (stdlib only): single `2fado` binary —
