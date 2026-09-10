@@ -1,0 +1,16 @@
+# Copy to /etc/2fado/2fado.conf and fill in the placeholders.
+# Dev override: export 2FADO_CONF, 2FADO_SOCKET, 2FADO_STATE.
+
+# Telegram bot token from @BotFather.
+BOT_TOKEN=__TELEGRAM_BOT_TOKEN__
+
+# Your numeric Telegram user id (from @userinfobot), comma-separated for n.
+APPROVERS=__TELEGRAM_USER_ID__
+
+# Optional: chat to page (defaults to the approver's private chat).
+# CHAT_ID=__TELEGRAM_CHAT_ID__
+
+SOCKET=/run/2fado.sock
+STATE_DIR=/var/lib/2fado
+POLICY=/etc/2fado/policy.json
+TIMEOUT=300

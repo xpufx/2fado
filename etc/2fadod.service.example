@@ -1,0 +1,15 @@
+[Unit]
+Description=2fado privileged daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/2fadod
+Environment=2FADO_CONF=/etc/2fado/2fado.conf
+Restart=on-failure
+# Hardening to tighten later: ProtectSystem=strict, PrivateTmp=yes, ...
+NoNewPrivileges=no
+
+[Install]
+WantedBy=multi-user.target

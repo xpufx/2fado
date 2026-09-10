@@ -1,0 +1,7 @@
+{
+  "_comment": "Copy to /etc/2fado/policy.json. Exact-argv matches only.",
+  "allow": [],
+  "deny": [],
+  "default": "ask",
+  "env_keep": []
+}

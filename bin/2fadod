@@ -1,0 +1,265 @@
+#!/usr/bin/env python3
+"""2fadod - privileged 2fado daemon (PoC).
+
+Single trust boundary: verifies agent requests, pages the human over
+Telegram, executes approved commands with a reconstructed environment.
+Listens on a unix socket; localhost only by construction.
+
+PoC limits: runs unprivileged, executes as self. The escalation point is
+execute() -- marked TODO -- where root will setuid/setgid per policy.
+"""
+import json
+import os
+import re
+import secrets
+import socket
+import socketserver
+import subprocess
+import sys
+import threading
+import time
+import urllib.parse
+import urllib.request
+
+CONF_PATH = os.environ.get("FADO_CONF", "/etc/2fado/2fado.conf")
+
+
+def load_conf(path):
+    conf = {}
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    conf[k.strip()] = v.strip().strip('"')
+    except FileNotFoundError:
+        pass
+    for k in list(conf):
+        if k in os.environ:
+            conf[k] = os.environ[k]
+        elif "FADO_" + k in os.environ:
+            conf[k] = os.environ["FADO_" + k]
+    conf.setdefault("SOCKET", "/run/2fado.sock")
+    conf.setdefault("STATE_DIR", "/var/lib/2fado")
+    conf.setdefault("TIMEOUT", "300")
+    for k in ("SOCKET", "STATE_DIR", "TIMEOUT", "POLICY",
+              "BOT_TOKEN", "APPROVERS", "CHAT_ID"):
+        if "FADO_" + k in os.environ:
+            conf[k] = os.environ["FADO_" + k]
+    return conf
+
+
+CONF = load_conf(CONF_PATH)
+STATE = CONF["STATE_DIR"]
+PENDING = os.path.join(STATE, "pending")
+os.makedirs(PENDING, exist_ok=True)
+AUDIT = os.path.join(STATE, "audit.log")
+OFFSET_FILE = os.path.join(STATE, "tg_offset")
+APPROVERS = {a.strip() for a in CONF.get("APPROVERS", "").split(",") if a.strip()}
+TOKEN = CONF.get("BOT_TOKEN", "")
+PLACEHOLDER = TOKEN.startswith("__") or not TOKEN
+
+try:
+    POLICY = json.load(open(CONF.get("POLICY", "/etc/2fado/policy.json")))
+except FileNotFoundError:
+    POLICY = {"allow": [], "deny": [], "default": "ask"}
+
+ENV_DENY = re.compile(r"^(LD_|PYTHON|PERL|RUBYOPT|NODE_|BASH_ENV|ENV=|CDPATH=)")
+ENV_KEEP = {"TERM", "LANG", "LC_ALL", "LC_MESSAGES", "TZ"}
+SAFE_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
+
+
+def audit(entry):
+    entry["ts"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    with open(AUDIT, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
+def scrub_env(env):
+    kept = {k: v for k, v in env.items()
+            if k in ENV_KEEP or k in POLICY.get("env_keep", [])}
+    dropped = [k for k in env if k not in kept]
+    kept["PATH"] = SAFE_PATH
+    return kept, dropped
+
+
+def tier(argv):
+    if argv in POLICY.get("deny", []):
+        return "deny"
+    if argv in POLICY.get("allow", []):
+        return "allow"
+    return POLICY.get("default", "ask")
+
+
+def tg(method, **params):
+    url = "https://api.telegram.org/bot%s/%s" % (TOKEN, method)
+    data = urllib.parse.urlencode(params).encode()
+    req = urllib.request.Request(url, data=data)
+    with urllib.request.urlopen(req, timeout=35) as r:
+        return json.load(r)
+
+
+def page_human(rid, argv, uid):
+    text = "2fado on %s wants:\n`%s`\nrequest `%s`" % (
+        os.uname().nodename, " ".join(argv), rid)
+    kb = {"inline_keyboard": [[
+        {"text": "Approve", "callback_data": "approve:" + rid},
+        {"text": "Deny", "callback_data": "deny:" + rid}]]}
+    if PLACEHOLDER:
+        print("[pager:stdout] %s  (approve: 2fado approve %s)" % (text, rid),
+              flush=True)
+        return
+    tg("sendMessage", chat_id=CONF.get("CHAT_ID", APPROVERS and next(iter(APPROVERS))),
+       text=text, parse_mode="Markdown",
+       reply_markup=json.dumps(kb))
+
+
+def consume(rid, decision, by):
+    """Atomically record a verdict; exactly one verdict wins (O_EXCL)."""
+    path = os.path.join(PENDING, rid + ".verdict")
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return False
+    with os.fdopen(fd, "w") as f:
+        json.dump({"decision": decision, "by": by,
+                   "ts": time.time()}, f)
+    return True
+
+
+def read_verdict(rid):
+    path = os.path.join(PENDING, rid + ".verdict")
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return None
+
+
+def telegram_loop():
+    offset = 0
+    try:
+        offset = int(open(OFFSET_FILE).read())
+    except (FileNotFoundError, ValueError):
+        pass
+    while True:
+        try:
+            res = tg("getUpdates", offset=offset, timeout=30)
+        except Exception:
+            time.sleep(5)
+            continue
+        for up in res.get("result", []):
+            offset = up["update_id"] + 1
+            cq = up.get("callback_query")
+            if not cq:
+                continue
+            data = cq.get("data", "")
+            m = re.match(r"^(approve|deny):([0-9a-f]{16})$", data)
+            sender = str(cq.get("from", {}).get("id", ""))
+            if m and sender in APPROVERS:
+                if consume(m.group(2), m.group(1), sender):
+                    try:
+                        tg("answerCallbackQuery",
+                           callback_query_id=cq["id"],
+                           text="recorded: " + m.group(1))
+                    except Exception:
+                        pass
+        try:
+            open(OFFSET_FILE, "w").write(str(offset))
+        except OSError:
+            pass
+
+
+def execute(argv, cwd, env):
+    # TODO(escalation): when root, setgid/setuid to the policy target
+    # (agent uid for audit runs, 0 for real escalation) before exec.
+    p = subprocess.run(argv, cwd=cwd, env=env,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    try:
+        out = p.stdout.decode("utf-8", "replace")
+    except Exception:
+        out = "<undecodable output>"
+    return p.returncode, out
+
+
+def handle_run(msg):
+    argv = msg["argv"]
+    uid = msg.get("uid", "?")
+    cwd = msg.get("cwd", "/")
+    clean, dropped = scrub_env(msg.get("env", {}))
+    t = tier(argv)
+    audit({"ev": "request", "uid": uid, "argv": argv, "cwd": cwd,
+           "tier": t, "env_dropped": dropped})
+    if t == "allow":
+        code, out = execute(argv, cwd, clean)
+        audit({"ev": "allow", "uid": uid, "argv": argv, "exit": code})
+        return {"status": "allowed", "exit": code, "output": out}
+    if t == "deny":
+        return {"status": "denied", "reason": "policy"}
+    rid = secrets.token_hex(8)
+    with open(os.path.join(PENDING, rid + ".json"), "w") as f:
+        json.dump({"argv": argv, "uid": uid, "cwd": cwd,
+                   "expires": time.time() + int(CONF["TIMEOUT"])}, f)
+    page_human(rid, argv, uid)
+    deadline = time.time() + int(CONF["TIMEOUT"])
+    while time.time() < deadline:
+        v = read_verdict(rid)
+        if v:
+            break
+        time.sleep(1)
+    else:
+        v = None
+    audit({"ev": "verdict", "argv": argv, "rid": rid,
+           "decision": v["decision"] if v else "timeout",
+           "by": v["by"] if v else None})
+    if v and v["decision"] == "approve":
+        code, out = execute(argv, cwd, clean)
+        return {"status": "allowed", "exit": code, "output": out}
+    return {"status": "denied",
+            "reason": v["decision"] if v else "timeout"}
+
+
+class Handler(socketserver.StreamRequestHandler):
+    def handle(self):
+        try:
+            msg = json.loads(self.rfile.readline().decode())
+        except Exception:
+            return
+        if "verdict" in msg:
+            # PoC path: local `2fado approve` (prod: SSO-bound UI only).
+            v = msg["verdict"]
+            ok = consume(v["id"], v["decision"], "local")
+            self.wfile.write(json.dumps({"recorded": ok}).encode() + b"\n")
+        elif "argv" in msg:
+            try:
+                import struct
+                peer = self.request.getsockopt(
+                    socket.SOL_SOCKET, socket.SO_PEERCRED,
+                    struct.calcsize("3i"))
+                msg["uid"] = struct.unpack("3i", peer)[1]
+            except Exception:
+                pass
+            res = handle_run(msg)
+            self.wfile.write(json.dumps(res).encode() + b"\n")
+
+
+def main():
+    try:
+        os.unlink(CONF["SOCKET"])
+    except FileNotFoundError:
+        pass
+    if not PLACEHOLDER:
+        threading.Thread(target=telegram_loop, daemon=True).start()
+    else:
+        print("2fadod: no BOT_TOKEN configured, pager=stdout; "
+              "verdicts via `2fado approve|deny <id>`", flush=True)
+    srv = socketserver.ThreadingUnixStreamServer(CONF["SOCKET"], Handler)
+    os.chmod(CONF["SOCKET"], 0o777)  # PoC; prod: dir perms + peer-uid checks
+    print("2fadod listening on %s (state %s)" % (CONF["SOCKET"], STATE),
+          flush=True)
+    srv.serve_forever()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
