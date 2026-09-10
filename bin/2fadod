@@ -100,12 +100,32 @@ def tg(method, **params):
         return json.load(r)
 
 
-def page_human(rid, argv, uid):
-    text = "2fado on %s wants:\n`%s`\nrequest `%s`" % (
-        os.uname().nodename, " ".join(argv), rid)
+def who(uid):
+    try:
+        import pwd
+        return "%s (uid %s)" % (pwd.getpwuid(int(uid)).pw_name, uid)
+    except Exception:
+        return "uid %s" % uid
+
+
+def card(argv, uid, cwd, rid, expires_in, verdict=None):
+    head = {"approve": "\u2705 *Approved*",
+            "deny": "\u274c *Denied*",
+            "timeout": "\u231b *Expired — denied*",
+            None: "\U0001f514 *Approval needed*"}[verdict]
+    return ("%s\n" % head +
+            "\U0001f5a5\ufe0f host: `%s`\n" % os.uname().nodename +
+            "\U0001f464 caller: `%s`\n" % who(uid) +
+            "\U0001f4c1 cwd: `%s`\n" % cwd +
+            "\u2328\ufe0f command:\n```\n%s\n```\n" % " ".join(argv) +
+            "\U0001f552 expires in %ds \u00b7 request `%s`" % (expires_in, rid))
+
+
+def page_human(rid, argv, uid, cwd):
+    text = card(argv, uid, cwd, rid, int(CONF["TIMEOUT"]))
     kb = {"inline_keyboard": [[
-        {"text": "Approve", "callback_data": "approve:" + rid},
-        {"text": "Deny", "callback_data": "deny:" + rid}]]}
+        {"text": "\u2705 Approve", "callback_data": "approve:" + rid},
+        {"text": "\u274c Deny", "callback_data": "deny:" + rid}]]}
     if PLACEHOLDER:
         print("[pager:stdout] %s  (approve: 2fado approve %s)" % (text, rid),
               flush=True)
@@ -156,12 +176,11 @@ def close_message(rid, argv, decision):
     try:
         with open(os.path.join(PENDING, rid + ".json")) as f:
             rec = json.load(f)
-        mark = {"approve": "\u2705 approved",
-                "deny": "\u274c denied"}.get(decision, "\u231b expired")
+        left = max(0, int(rec.get("expires", 0) - time.time()))
         tg("editMessageText", chat_id=rec["chat_id"],
            message_id=rec["message_id"],
-           text="%s\n`%s`\nrequest `%s`" % (
-               mark, " ".join(argv), rid),
+           text=card(argv, rec.get("uid", "?"), rec.get("cwd", "?"),
+                      rid, left, verdict=decision),
            parse_mode="Markdown",
            reply_markup=json.dumps({"inline_keyboard": []}))
     except Exception:
