@@ -223,15 +223,23 @@ def telegram_loop():
 
 
 def execute(argv, cwd, env):
-    # TODO(escalation): when root, setgid/setuid to the policy target
-    # (agent uid for audit runs, 0 for real escalation) before exec.
+    # Step 0: the daemon is root, the child runs as the policy target
+    # (root for escalation). target=None means "stay as we are" (dev).
+    target = POLICY.get("target_user", "root" if os.geteuid() == 0 else None)
+    popen_kw = {}
+    if target is not None:
+        import pwd as _pwd, grp as _grp
+        pw = _pwd.getpwnam(target) if isinstance(target, str) else _pwd.getpwuid(target)
+        popen_kw = {"user": pw.pw_uid, "group": pw.pw_gid}
+    as_uid = popen_kw.get("user", os.geteuid())
     p = subprocess.run(argv, cwd=cwd, env=env,
-                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                       **popen_kw)
     try:
         out = p.stdout.decode("utf-8", "replace")
     except Exception:
         out = "<undecodable output>"
-    return p.returncode, out
+    return p.returncode, out, as_uid
 
 
 def handle_run(msg):
@@ -243,8 +251,9 @@ def handle_run(msg):
     audit({"ev": "request", "uid": uid, "argv": argv, "cwd": cwd,
            "tier": t, "env_dropped": dropped})
     if t == "allow":
-        code, out = execute(argv, cwd, clean)
-        audit({"ev": "allow", "uid": uid, "argv": argv, "exit": code})
+        code, out, as_uid = execute(argv, cwd, clean)
+        audit({"ev": "allow", "uid": uid, "argv": argv,
+               "as_uid": as_uid, "exit": code})
         return {"status": "allowed", "exit": code, "output": out}
     if t == "deny":
         return {"status": "denied", "reason": "policy"}
@@ -267,7 +276,9 @@ def handle_run(msg):
            "by": v["by"] if v else None})
     close_message(rid, argv, decision)
     if v and v["decision"] == "approve":
-        code, out = execute(argv, cwd, clean)
+        code, out, as_uid = execute(argv, cwd, clean)
+        audit({"ev": "exec", "argv": argv, "rid": rid,
+               "as_uid": as_uid, "exit": code})
         return {"status": "allowed", "exit": code, "output": out}
     return {"status": "denied",
             "reason": v["decision"] if v else "timeout"}
