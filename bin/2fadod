@@ -252,7 +252,7 @@ def handle_run(msg):
     with open(os.path.join(PENDING, rid + ".json"), "w") as f:
         json.dump({"argv": argv, "uid": uid, "cwd": cwd,
                    "expires": time.time() + int(CONF["TIMEOUT"])}, f)
-    page_human(rid, argv, uid)
+    page_human(rid, argv, uid, cwd)
     deadline = time.time() + int(CONF["TIMEOUT"])
     while time.time() < deadline:
         v = read_verdict(rid)
