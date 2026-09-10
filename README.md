@@ -1,74 +1,52 @@
-# 2fado — 2FA for sudo, for autonomous agents
+# 2fado — out-of-band approval for agent command execution
 
-`2fado` (2FA daemon) is a second factor for `sudo` designed for autonomous
-agent use, with an optional remote approval step.
+Agents are fast, literal, and surrounded by untrusted text. `2fado` puts a
+human in the loop of *execution*: the agent petitions, your phone buzzes,
+you tap, it runs. Everything is recorded.
 
-## Problem
+No sudo involved (yet): the agent runs `2fado run -- <argv>`, the `2fadod`
+daemon decides (policy → allow / deny / ask-human over Telegram), executes
+approved commands itself, and relays stdout + exit code. Fail closed on
+every path: deny, timeout, error, or a phone left untouched.
 
-Agents routinely need `sudo`, but:
+## Status: working PoC
 
-- NOPASSWD `sudo` is convenient and terrifying.
-- Password-in-a-file `sudo` is just NOPASSWD with extra steps.
-- Interactive 2FA (TOTP / push) blocks autonomy — nobody is awake at 3am to
-  approve `apt install`.
-
-`2fado` keeps a human-grade second factor without killing autonomy: routine,
-policy-approved escalations succeed on their own, everything else pends for
-remote approval.
-
-## How it works
-
-```
-agent → sudo → PAM (pam_exec) → 2fado policy engine ─┬─ allow (signed, audited)
-                                                      ├─ deny (audited)
-                                                      └─ pend → remote approver
-                                                              (e.g. phone / chat)
-                                                                ├─ approve → allow
-                                                                └─ deny/timeout → deny
-```
-
-1. Agent runs `sudo <cmd>`.
-2. A PAM `pam_exec` hook calls `2fado check --user … --command …`.
-3. `2fado` evaluates policy (`/etc/2fado/policy.yaml`):
-   - `allow` rules: exact command allowlists per agent/user, with rate limits
-     and expiry.
-   - `require-approval` rules: push a request to the remote second factor
-     (out-of-band approve/deny), fail-closed on timeout.
-   - default: `deny`.
-4. Every decision is appended to a signed, append-only audit log
-   (`/var/log/2fado/audit.log`).
-5. Optional `2fado agent` daemon holds the approval queue and serves the
-   remote approver channel (TUI / webhook / Matrix / SSH — transport TBD).
-
-## Design principles
-
-- **Fail closed.** Any error, timeout, or missing policy = deny.
-- **Least privilege.** Allowlists are exact argv matches, not prefixes. No
-  shells, no wildcards that smuggle `sh -c`.
-- **Autonomy where safe, human where not.** Boring, pinned commands auto-pass;
-  novel or destructive ones wait for a human.
-- **Auditable.** Every allow/deny/approval is logged with who, what, when, and
-  the policy line that fired.
-- **No secrets in agent reach.** The agent never holds the approval key; it can
-  request, never grant.
-
-## Planned layout
+Live and ringing: daemon + client + Telegram pager, stdlib-only Python,
+verified end to end (approve-by-phone, deny-by-phone, timeout, sender
+allowlist, one-time tokens, audit log). Runs unprivileged — approved
+commands execute as you. Root execution (`target_user`) is implemented but
+parked: inert unless deliberately launched as root.
 
 ```
-2fado/
-├── README.md
-├── policy.example.yaml      # example /etc/2fado/policy.yaml
-├── pam.d/sudo               # pam_exec line to wire into sudo
-├── src/2fado                # policy engine + CLI (check, approve, audit)
-└── docs/threat-model.md     # what this does and does NOT protect against
+bin/2fado    agent client: 2fado run -- <argv...> | approve|deny <id>
+bin/2fadod   privileged daemon: policy, pager, verdicts, execution, audit
+etc/         2fado.conf.example (__TELEGRAM_BOT_TOKEN__ / __TELEGRAM_USER_ID__),
+             policy.json.example, 2fadod.service.example
+docs/spec.md            general spec + flow diagram (the web-scale version)
+docs/options/           four tool compositions researched (step-ca, Authentik,
+                        Authelia, Rauthy, privacyIDEA) — all still pivotable
+docs/comparison.md      option matrix
+docs/recommendation.md  recommended stack + build order
+docs/poc.md             runbook: try the PoC in two terminals, no root needed
 ```
 
-## Status
+## Try it (no root, no token)
 
-Greenfield — this README is the spec. Implementation starts with the policy
-engine (`2fado check`) and the PAM wiring; the remote approval transport comes
-second.
+```sh
+export FADO_SOCKET=/tmp/2fado-$USER.sock FADO_STATE_DIR=/tmp/2fado-$USER
+export FADO_CONF=$PWD/etc/2fado.conf.example
+./bin/2fadod &                                  # pager=stdout in this mode
+./bin/2fado run -- /bin/echo hi                 # terminal 1: waits
+./bin/2fado approve <request-id>                # terminal 2: the human
+```
 
-## License
+Paste a bot token + your Telegram id into the config and terminal 2
+becomes your phone (outbound long-poll, no open ports).
 
-TBD.
+## Design in one breath
+
+The traveled message is evidence; the box record is authority. Execution
+reads only the stored argv — never anything that crossed a wire. The agent
+petitions but never grants; the daemon owns its children (requestor can't
+signal them, only ask for cancellation); the audit says who asked, who
+approved, what ran, and as whom.
