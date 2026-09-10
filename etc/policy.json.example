@@ -1,7 +1,8 @@
 {
-  "_comment": "Copy to /etc/2fado/policy.json. Exact-argv matches only.",
-  "allow": [],
-  "deny": [],
+  "_comment": "mode blacklist: whitelist runs, blacklist denies, rest -> default(ask|deny). mode whitelist: whitelist runs, EVERYTHING else denies (blacklist+default ignored). Exact-argv matches only.",
+  "mode": "blacklist",
+  "whitelist": [],
+  "blacklist": [],
   "confirm": [
     [
       "rm",

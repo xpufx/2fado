@@ -81,8 +81,8 @@ func TestScrubEnvKeepCannotOverrideDeny(t *testing.T) {
 
 func TestRunAllowTierExecutesWithoutPaging(t *testing.T) {
 	svc := testService(t, policy.Policy{
-		Allow:   [][]string{{"/bin/true"}},
-		Default: "ask",
+		Whitelist: [][]string{{"/bin/true"}},
+		Default:   "ask",
 	})
 	res := svc.Run(protocol.RunRequest{Argv: []string{"/bin/true"}, Cwd: t.TempDir(), Env: map[string]string{}}, 1000)
 	if res.Status != "allowed" || res.Exit != 0 {
@@ -92,9 +92,9 @@ func TestRunAllowTierExecutesWithoutPaging(t *testing.T) {
 
 func TestRunDenyTierRefusesWithoutExec(t *testing.T) {
 	svc := testService(t, policy.Policy{
-		Deny:    [][]string{{"/bin/echo", "hi", ";", "rm", "-rf", "/"}},
-		Allow:   [][]string{{"/bin/echo", "hi"}},
-		Default: "ask",
+		Blacklist: [][]string{{"/bin/echo", "hi", ";", "rm", "-rf", "/"}},
+		Whitelist: [][]string{{"/bin/echo", "hi"}},
+		Default:   "ask",
 	})
 	chained := []string{"/bin/echo", "hi", ";", "rm", "-rf", "/"}
 	if tier := svc.Policy.Tier(chained); tier != "deny" {

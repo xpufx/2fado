@@ -6,22 +6,39 @@ import (
 	"testing"
 )
 
-func TestTierDenyWinsOverAllow(t *testing.T) {
+func TestTierWhitelistWinsOverBlacklist(t *testing.T) {
 	p := Policy{
-		Allow:   [][]string{{"/bin/echo", "hi"}},
-		Deny:    [][]string{{"/bin/echo", "hi"}},
-		Default: "ask",
+		Whitelist: [][]string{{"/bin/echo", "hi"}},
+		Blacklist: [][]string{{"/bin/echo", "hi"}},
+		Default:   "ask",
 	}
-	if got := p.Tier([]string{"/bin/echo", "hi"}); got != "deny" {
-		t.Fatalf("Tier = %q, want deny", got)
+	if got := p.Tier([]string{"/bin/echo", "hi"}); got != "allow" {
+		t.Fatalf("Tier = %q, want allow", got)
+	}
+}
+
+func TestWhitelistModeIgnoresBlacklistAndDefault(t *testing.T) {
+	p := Policy{
+		Mode:      "whitelist",
+		Whitelist: [][]string{{"/bin/echo", "hi"}},
+		Blacklist: [][]string{{"/bin/echo", "bye"}},
+		Default:   "ask",
+	}
+	if got := p.Tier([]string{"/bin/echo", "hi"}); got != "allow" {
+		t.Errorf("Tier = %q, want allow", got)
+	}
+	for _, argv := range [][]string{{"/bin/echo", "bye"}, {"/bin/ls"}} {
+		if got := p.Tier(argv); got != "deny" {
+			t.Errorf("Tier(%q) = %q, want deny (whitelist mode: blacklist+default are noop)", argv, got)
+		}
 	}
 }
 
 func TestTierExactMatchOnly(t *testing.T) {
 	p := Policy{
-		Allow:   [][]string{{"/usr/bin/git", "status"}},
-		Deny:    [][]string{{"/bin/rm", "-rf", "/"}},
-		Default: "ask",
+		Whitelist: [][]string{{"/usr/bin/git", "status"}},
+		Blacklist: [][]string{{"/bin/rm", "-rf", "/"}},
+		Default:   "ask",
 	}
 	cases := []struct {
 		name string
@@ -47,9 +64,9 @@ func TestTierExactMatchOnly(t *testing.T) {
 
 func TestTierAdversarialMisses(t *testing.T) {
 	p := Policy{
-		Allow:   [][]string{{"/bin/echo", "hi"}},
-		Deny:    [][]string{{"/bin/rm", "-rf", "/"}},
-		Default: "ask",
+		Whitelist: [][]string{{"/bin/echo", "hi"}},
+		Blacklist: [][]string{{"/bin/rm", "-rf", "/"}},
+		Default:   "ask",
 	}
 	cases := []struct {
 		name string
@@ -89,7 +106,7 @@ func TestTierAdversarialMisses(t *testing.T) {
 }
 
 func TestTierDefaultPassthrough(t *testing.T) {
-	for _, def := range []string{"ask", "allow", "deny"} {
+	for _, def := range []string{"ask", "deny"} {
 		p := Policy{Default: def}
 		if got := p.Tier([]string{"/bin/ls"}); got != def {
 			t.Errorf("Default %q: Tier = %q, want %q", def, got, def)
@@ -110,7 +127,7 @@ func TestLoad(t *testing.T) {
 
 	t.Run("empty default normalizes to ask", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "policy.json")
-		if err := os.WriteFile(path, []byte(`{"allow":[],"deny":[]}`), 0o600); err != nil {
+		if err := os.WriteFile(path, []byte(`{"whitelist":[],"blacklist":[]}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		if got := Load(path).Default; got != "ask" {
@@ -120,7 +137,7 @@ func TestLoad(t *testing.T) {
 
 	t.Run("loads argv vectors", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "policy.json")
-		body := `{"allow":[["/bin/echo","hi"]],"deny":[["/bin/rm","-rf","/"]],"default":"ask"}`
+		body := `{"mode":"blacklist","whitelist":[["/bin/echo","hi"]],"blacklist":[["/bin/rm","-rf","/"]],"default":"ask"}`
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -138,7 +155,7 @@ func TestLoad(t *testing.T) {
 
 	t.Run("malformed file fails closed to ask", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "policy.json")
-		if err := os.WriteFile(path, []byte(`{"allow": "not-a-vector"}`), 0o600); err != nil {
+		if err := os.WriteFile(path, []byte(`{"whitelist": "not-a-vector"}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		p := Load(path)

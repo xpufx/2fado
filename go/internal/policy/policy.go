@@ -6,19 +6,26 @@ import (
 	"os"
 )
 
+// Modes: "blacklist" (whitelist runs, blacklist denies, rest falls to
+// Default — today's behavior) or "whitelist" (whitelist runs, everything
+// else denies; blacklist and Default are documented noops).
 type Policy struct {
-	Allow   [][]string `json:"allow"`
-	Deny    [][]string `json:"deny"`
-	Confirm [][]string `json:"confirm"`
-	Default string     `json:"default"`
-	EnvKeep []string   `json:"env_keep"`
-	Target  string     `json:"target_user"`
+	Mode      string     `json:"mode"`
+	Whitelist [][]string `json:"whitelist"`
+	Blacklist [][]string `json:"blacklist"`
+	Confirm   [][]string `json:"confirm"`
+	Default   string     `json:"default"`
+	EnvKeep   []string   `json:"env_keep"`
+	Target    string     `json:"target_user"`
 }
 
 func Load(path string) Policy {
-	p := Policy{Default: "ask"}
+	p := Policy{Mode: "blacklist", Default: "ask"}
 	if data, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(data, &p)
+	}
+	if p.Mode == "" {
+		p.Mode = "blacklist"
 	}
 	if p.Default == "" {
 		p.Default = "ask"
@@ -50,14 +57,17 @@ func (p Policy) NeedsConfirm(argv []string) bool {
 }
 
 func (p Policy) Tier(argv []string) string {
-	for _, d := range p.Deny {
-		if equal(argv, d) {
-			return "deny"
-		}
-	}
-	for _, a := range p.Allow {
+	for _, a := range p.Whitelist {
 		if equal(argv, a) {
 			return "allow"
+		}
+	}
+	if p.Mode == "whitelist" {
+		return "deny"
+	}
+	for _, d := range p.Blacklist {
+		if equal(argv, d) {
+			return "deny"
 		}
 	}
 	return p.Default

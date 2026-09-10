@@ -1,8 +1,10 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { createGreeting } from "./server/greeting";
-import { greetingRpc } from "./shared/greeting";
+import { pendingList, verdict, approvalSettings } from "./shared/approval";
+import { listPending, submitVerdict } from "./server/fado";
 
 export default function contribute(server: PluginServerContext) {
-  server.handle(greetingRpc, createGreeting);
+  server.registerSettings(approvalSettings);
+  server.handle(pendingList, listPending);
+  server.handle(verdict, submitVerdict);
   return () => {};
 }
