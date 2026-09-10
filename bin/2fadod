@@ -110,9 +110,21 @@ def page_human(rid, argv, uid):
         print("[pager:stdout] %s  (approve: 2fado approve %s)" % (text, rid),
               flush=True)
         return
-    tg("sendMessage", chat_id=CONF.get("CHAT_ID", APPROVERS and next(iter(APPROVERS))),
-       text=text, parse_mode="Markdown",
-       reply_markup=json.dumps(kb))
+    chat = CONF.get("CHAT_ID", next(iter(APPROVERS)))
+    res = tg("sendMessage", chat_id=chat,
+             text=text, parse_mode="Markdown",
+             reply_markup=json.dumps(kb))
+    try:
+        mid = res["result"]["message_id"]
+        path = os.path.join(PENDING, rid + ".json")
+        with open(path) as f:
+            rec = json.load(f)
+        rec["chat_id"] = chat
+        rec["message_id"] = mid
+        with open(path, "w") as f:
+            json.dump(rec, f)
+    except Exception:
+        pass
 
 
 def consume(rid, decision, by):
@@ -135,6 +147,25 @@ def read_verdict(rid):
             return json.load(f)
     except FileNotFoundError:
         return None
+
+
+def close_message(rid, argv, decision):
+    """Rewrite the pager message to its final state (buttons removed)."""
+    if PLACEHOLDER:
+        return
+    try:
+        with open(os.path.join(PENDING, rid + ".json")) as f:
+            rec = json.load(f)
+        mark = {"approve": "\u2705 approved",
+                "deny": "\u274c denied"}.get(decision, "\u231b expired")
+        tg("editMessageText", chat_id=rec["chat_id"],
+           message_id=rec["message_id"],
+           text="%s\n`%s`\nrequest `%s`" % (
+               mark, " ".join(argv), rid),
+           parse_mode="Markdown",
+           reply_markup=json.dumps({"inline_keyboard": []}))
+    except Exception:
+        pass
 
 
 def telegram_loop():
@@ -162,7 +193,8 @@ def telegram_loop():
                     try:
                         tg("answerCallbackQuery",
                            callback_query_id=cq["id"],
-                           text="recorded: " + m.group(1))
+                           text="approved — executing" if m.group(1) == "approve"
+                           else "denied")
                     except Exception:
                         pass
         try:
@@ -210,9 +242,11 @@ def handle_run(msg):
         time.sleep(1)
     else:
         v = None
+    decision = v["decision"] if v else "timeout"
     audit({"ev": "verdict", "argv": argv, "rid": rid,
-           "decision": v["decision"] if v else "timeout",
+           "decision": decision,
            "by": v["by"] if v else None})
+    close_message(rid, argv, decision)
     if v and v["decision"] == "approve":
         code, out = execute(argv, cwd, clean)
         return {"status": "allowed", "exit": code, "output": out}
