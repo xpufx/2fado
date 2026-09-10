@@ -9,6 +9,7 @@ import (
 type Policy struct {
 	Allow   [][]string `json:"allow"`
 	Deny    [][]string `json:"deny"`
+	Confirm [][]string `json:"confirm"`
 	Default string     `json:"default"`
 	EnvKeep []string   `json:"env_keep"`
 	Target  string     `json:"target_user"`
@@ -35,6 +36,17 @@ func equal(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// NeedsConfirm reports whether argv is opted into the two-step
+// challenge. Exact matches only — heuristics may never decide.
+func (p Policy) NeedsConfirm(argv []string) bool {
+	for _, c := range p.Confirm {
+		if equal(argv, c) {
+			return true
+		}
+	}
+	return false
 }
 
 func (p Policy) Tier(argv []string) string {

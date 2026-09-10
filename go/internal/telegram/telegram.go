@@ -85,21 +85,33 @@ func Who(uid uint32) string {
 	return fmt.Sprintf("uid %d", uid)
 }
 
-// Card renders the approval request. Verdict is "" while pending.
-func Card(host string, argv []string, uid uint32, cwd, rid string, expiresIn int64, verdict string) string {
+// Card renders the approval request. Verdict is "" while pending,
+// "confirm" for the second-step challenge.
+func Card(host string, argv []string, uid uint32, cwd, rid string, expiresIn int64, verdict string, dry bool) string {
 	var head string
 	switch verdict {
 	case "approve":
 		head = "✅ *Approved*"
+		if dry {
+			head = "✅ *Approved (dry run — not executed)*"
+		}
 	case "deny":
 		head = "❌ *Denied*"
 	case "timeout":
 		head = "⌛ *Expired — denied*"
+	case "confirm":
+		head = "⚠️ *Are you sure? Tap again to run*"
 	default:
 		head = "🔔 *Approval needed*"
 	}
 	return fmt.Sprintf("%s\n🖥️ host: `%s`\n👤 caller: `%s`\n📁 cwd: `%s`\n⌨️ command:\n```\n%s\n```\n🕒 expires in %ds · request `%s`",
 		head, host, Who(uid), cwd, strings.Join(argv, " "), expiresIn, rid)
+}
+
+// Buttons builds the inline keyboard; exported so the service can
+// re-key an edited card (confirm step reuses the same wire format).
+func Buttons(rid string) string {
+	return keyboard(rid)
 }
 
 func keyboard(rid string) string {
@@ -135,16 +147,22 @@ func parseMsgID(body []byte) (int64, error) {
 	return r.Result.ID, nil
 }
 
-// Edit rewrites a posted card to its final state (buttons removed).
-func (c Client) Edit(chatID string, msgID int64, text string) {
-	empty, _ := json.Marshal(Keyboard{Buttons: [][]InlineButton{}})
+// Edit rewrites a posted card. Pass Buttons(rid) to keep live buttons
+// (confirm step) or EmptyButtons() to close it.
+func (c Client) Edit(chatID string, msgID int64, text, markup string) {
 	_, _ = c.call("editMessageText", url.Values{
 		"chat_id":      {chatID},
 		"message_id":   {strconv.FormatInt(msgID, 10)},
 		"text":         {text},
 		"parse_mode":   {"Markdown"},
-		"reply_markup": {string(empty)},
+		"reply_markup": {markup},
 	})
+}
+
+// EmptyButtons strips all buttons (final states).
+func EmptyButtons() string {
+	empty, _ := json.Marshal(Keyboard{Buttons: [][]InlineButton{}})
+	return string(empty)
 }
 
 func (c Client) answer(cbID, text string) {

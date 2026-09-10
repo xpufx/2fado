@@ -10,13 +10,15 @@ import (
 )
 
 type Conf struct {
-	BotToken  string
-	Approvers []string
-	ChatID    string
-	Socket    string
-	StateDir  string
-	Policy    string
-	Timeout   int
+	BotToken   string
+	Approvers  []string
+	ChatID     string
+	Socket     string
+	StateDir   string
+	Policy     string
+	Timeout    int
+	DryRun     bool
+	ConfirmAll bool
 }
 
 func Load(path string) Conf {
@@ -58,6 +60,8 @@ func Load(path string) Conf {
 			c.Approvers = append(c.Approvers, a)
 		}
 	}
+	c.DryRun = get("DRY_RUN", "") == "true"
+	c.ConfirmAll = get("CONFIRM_ALL", "") == "true"
 	if t := get("TIMEOUT", ""); t != "" {
 		var n int
 		for _, ch := range t {

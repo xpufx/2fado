@@ -14,6 +14,7 @@ import (
 	"os/user"
 	"regexp"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -103,7 +104,11 @@ func (s Service) targetUID() (uint32, error) {
 
 // Execute runs argv with reconstructed cwd/env as the policy target.
 // Callers pass the stored record fields — never wire content.
+// Dry-run short-circuits before any spawn: nothing executes, exit 0.
 func (s Service) Execute(argv []string, cwd string, env map[string]string) (code int, out string, asUID uint32) {
+	if s.Conf.DryRun {
+		return 0, "would have run: " + strings.Join(argv, " "), uint32(os.Geteuid())
+	}
 	uid, err := s.targetUID()
 	if err != nil {
 		return 1, "2fadod: bad target_user: " + err.Error(), uint32(os.Geteuid())
@@ -168,13 +173,64 @@ func (s Service) Run(req protocol.RunRequest, uid uint32) protocol.RunResult {
 	}
 	s.Store.Append(protocol.AuditEvent{Ev: "verdict", Argv: req.Argv,
 		RID: rid, Decision: decision, By: by})
+	if decision != "approve" {
+		s.closeCard(rid, req, uid, decision)
+		return protocol.RunResult{Status: "denied", Reason: decision}
+	}
+	if s.needsConfirm(req.Argv) {
+		return s.confirm(rid, req, uid, clean, by)
+	}
+	s.closeCard(rid, req, uid, decision)
+	return s.runApproved(rid, req, uid, clean)
+}
+
+func (s Service) needsConfirm(argv []string) bool {
+	return s.Conf.ConfirmAll || s.Policy.NeedsConfirm(argv)
+}
+
+// confirm chains a second ask onto an approved request: a fresh record
+// with fresh buttons on the same card, reusing every seam (one-wins
+// consume, timeout, audit). A replay of step 1 alone buys nothing.
+func (s Service) confirm(rid1 string, req protocol.RunRequest, uid uint32, clean map[string]string, by string) protocol.RunResult {
+	rec1, err := s.Store.Load(rid1)
+	if err != nil {
+		return protocol.RunResult{Status: "denied", Reason: "lost-record"}
+	}
+	rid := newRID()
+	expires := time.Now().Add(time.Duration(s.Conf.Timeout) * time.Second)
+	_ = s.Store.Save(protocol.PendingRecord{Argv: req.Argv, UID: uid,
+		Cwd: req.Cwd, Expires: expires.Unix(),
+		ChatID: rec1.ChatID, MsgID: rec1.MsgID}, rid)
+	s.Store.Append(protocol.AuditEvent{Ev: "confirm", Argv: req.Argv,
+		RID: rid + "<" + rid1, By: by})
+	left := int64(s.Conf.Timeout)
+	if !s.Conf.Placeholder() && rec1.ChatID != "" {
+		s.TG.Edit(rec1.ChatID, rec1.MsgID, telegram.Card(s.Host, req.Argv,
+			uid, req.Cwd, rid, left, "confirm", s.Conf.DryRun),
+			telegram.Buttons(rid))
+	} else {
+		fmt.Printf("[pager:stdout] CONFIRM %s (approve: 2fado approve %s)\n", rid, rid)
+	}
+	v := s.await(rid, expires)
+	decision := "timeout"
+	cby := ""
+	if v != nil {
+		decision = v.Decision
+		cby = v.By
+	}
+	s.Store.Append(protocol.AuditEvent{Ev: "verdict", Argv: req.Argv,
+		RID: rid, Decision: decision, By: cby})
 	s.closeCard(rid, req, uid, decision)
 	if decision != "approve" {
 		return protocol.RunResult{Status: "denied", Reason: decision}
 	}
+	return s.runApproved(rid, req, uid, clean)
+}
+
+func (s Service) runApproved(rid string, req protocol.RunRequest, uid uint32, clean map[string]string) protocol.RunResult {
 	code, out, asUID := s.Execute(req.Argv, req.Cwd, clean)
 	s.Store.Append(protocol.AuditEvent{Ev: "exec", Argv: req.Argv,
-		RID: rid, AsUID: asUID, Exit: code})
+		RID: rid, AsUID: asUID, Exit: code, Dry: s.Conf.DryRun})
 	return protocol.RunResult{Status: "allowed", Exit: code, Output: out}
 }
 
@@ -214,7 +270,7 @@ func (s Service) chatID() string {
 
 func (s Service) page(rid string, req protocol.RunRequest, uid uint32) {
 	text := telegram.Card(s.Host, req.Argv, uid, req.Cwd, rid,
-		int64(s.Conf.Timeout), "")
+		int64(s.Conf.Timeout), "", s.Conf.DryRun)
 	if s.Conf.Placeholder() {
 		fmt.Printf("[pager:stdout] approve: 2fado approve %s\n%s\n", rid, text)
 		return
@@ -237,7 +293,8 @@ func (s Service) closeCard(rid string, req protocol.RunRequest, uid uint32, deci
 		left = 0
 	}
 	s.TG.Edit(rec.ChatID, rec.MsgID, telegram.Card(s.Host, req.Argv,
-		rec.UID, rec.Cwd, rid, left, decision))
+		rec.UID, rec.Cwd, rid, left, decision, s.Conf.DryRun),
+		telegram.EmptyButtons())
 }
 
 // TelegramPump consumes poll results into the store (atomic: one wins).

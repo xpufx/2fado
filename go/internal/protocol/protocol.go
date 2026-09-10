@@ -68,6 +68,7 @@ type AuditEvent struct {
 	Decision   string   `json:"decision,omitempty"`
 	RID        string   `json:"rid,omitempty"`
 	AsUID      uint32   `json:"as_uid,omitempty"`
+	Dry        bool     `json:"dry,omitempty"`
 	Exit       int      `json:"exit,omitempty"`
 	EnvDropped []string `json:"env_dropped,omitempty"`
 	TS         string   `json:"ts"`
