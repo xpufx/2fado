@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"2fado/internal/protocol"
@@ -81,6 +82,34 @@ func (s Store) Consume(rid, decision, by string) bool {
 	defer f.Close()
 	_, err = f.Write(data)
 	return err == nil
+}
+
+// List returns unexpired, undecided records, newest last.
+func (s Store) List(now int64) []protocol.PendingItem {
+	entries, err := os.ReadDir(s.Pending)
+	if err != nil {
+		return nil
+	}
+	var out []protocol.PendingItem
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		rid := strings.TrimSuffix(name, ".json")
+		if s.Verdict(rid) != nil {
+			continue
+		}
+		rec, err := s.Load(rid)
+		if err != nil || rec.Expires <= now {
+			continue
+		}
+		out = append(out, protocol.PendingItem{
+			ID: rid, Argv: rec.Argv, UID: rec.UID, Cwd: rec.Cwd,
+			ExpiresIn: rec.Expires - now,
+		})
+	}
+	return out
 }
 
 func (s Store) Verdict(rid string) *protocol.VerdictRecord {

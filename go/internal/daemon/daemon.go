@@ -79,6 +79,8 @@ func handle(svc service.Service, c net.Conn) {
 	case msg.Run != nil:
 		res := svc.Run(*msg.Run, peerUID(c))
 		out, _ = json.Marshal(res)
+	case msg.List != nil:
+		out, _ = json.Marshal(svc.List())
 	default:
 		return
 	}

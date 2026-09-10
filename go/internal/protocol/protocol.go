@@ -24,6 +24,24 @@ type VerdictSubmit struct {
 type ClientMessage struct {
 	Run     *RunRequest    `json:"run,omitempty"`
 	Verdict *VerdictSubmit `json:"verdict,omitempty"`
+	List    *ListRequest   `json:"list,omitempty"`
+}
+
+// ListRequest asks for pending records (plugin server polls this).
+type ListRequest struct{}
+
+// PendingItem is one row of the list answer.
+type PendingItem struct {
+	ID        string   `json:"id"`
+	Argv      []string `json:"argv"`
+	UID       uint32   `json:"uid"`
+	Cwd       string   `json:"cwd"`
+	ExpiresIn int64    `json:"expires_in"`
+}
+
+// PendingList answers ListRequest: unexpired, undecided records only.
+type PendingList struct {
+	Items []PendingItem `json:"items"`
 }
 
 // RunResult is the daemon's final answer to a run request.

@@ -234,6 +234,15 @@ func (s Service) runApproved(rid string, req protocol.RunRequest, uid uint32, cl
 	return protocol.RunResult{Status: "allowed", Exit: code, Output: out}
 }
 
+// List answers the plugin server's poll: pending, unexpired, undecided.
+func (s Service) List() protocol.PendingList {
+	items := s.Store.List(time.Now().Unix())
+	if items == nil {
+		items = []protocol.PendingItem{}
+	}
+	return protocol.PendingList{Items: items}
+}
+
 // Submit records a local verdict (PoC path; production: SSO-bound UI).
 func (s Service) Submit(sub protocol.VerdictSubmit) protocol.VerdictAck {
 	if sub.Decision != "approve" && sub.Decision != "deny" {
