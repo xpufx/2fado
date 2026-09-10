@@ -249,8 +249,30 @@ func (s Service) Submit(sub protocol.VerdictSubmit) protocol.VerdictAck {
 		return protocol.VerdictAck{Recorded: false}
 	}
 	return protocol.VerdictAck{
-		Recorded: s.Store.Consume(sub.ID, sub.Decision, "local"),
+		Recorded: s.Store.Consume(sub.ID, sub.Decision, cleanBy(sub.By)),
 	}
+}
+
+// cleanBy keeps attribution honest: a tight charset, capped length,
+// fallback to "local". This names the decider; it never authorizes.
+func cleanBy(by string) string {
+	if by == "" {
+		return "local"
+	}
+	var b strings.Builder
+	for _, r := range by {
+		if b.Len() >= 64 {
+			break
+		}
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' ||
+			r >= '0' && r <= '9' || r == ':' || r == '_' || r == '-' || r == '@' || r == '.' {
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() == 0 {
+		return "local"
+	}
+	return b.String()
 }
 
 // await polls the store only: TelegramPump is the single consumer of the

@@ -15,9 +15,13 @@ type RunRequest struct {
 
 // VerdictSubmit records a human decision. In the PoC any local uid may
 // submit; production restricts this to the SSO-bound UI.
+// By names the decider (e.g. "paseo:<user>"); the daemon sanitizes it
+// and falls back to "local". Attributional, never authoritative: the
+// allowlist check lives with the submitter (plugin settings, SSO gate).
 type VerdictSubmit struct {
 	ID       string `json:"id"`
 	Decision string `json:"decision"` // approve | deny
+	By       string `json:"by,omitempty"`
 }
 
 // ClientMessage is the socket envelope: exactly one field is set.
