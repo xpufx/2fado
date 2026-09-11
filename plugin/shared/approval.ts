@@ -35,7 +35,7 @@ const settingsSchema = z.object({
     .string()
     .trim()
     .min(1, "Enter the 2fadod socket path")
-    .default("/run/2fado.sock")
+    .default("/tmp/2fado.sock")
     .describe("2fadod socket"),
   telegramFallback: z.boolean().default(true).describe("Telegram fallback"),
 });
