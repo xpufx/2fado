@@ -255,6 +255,11 @@ func (s Service) Recent(limit int) protocol.RecentList {
 	return protocol.RecentList{Items: items}
 }
 
+// Status answers a query for the state and outcome of a specific request ID.
+func (s Service) Status(id string) protocol.StatusResponse {
+	return s.Store.Status(id, time.Now().Unix())
+}
+
 // Submit records a local verdict (PoC path; production: SSO-bound UI).
 func (s Service) Submit(sub protocol.VerdictSubmit) protocol.VerdictAck {
 	if sub.Decision != "approve" && sub.Decision != "deny" {

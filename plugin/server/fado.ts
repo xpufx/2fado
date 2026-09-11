@@ -2,7 +2,7 @@ import net from "node:net";
 import os from "node:os";
 import type { RpcInput, RpcOutput } from "paseo-plugin-helper/shared";
 import { createPluginLogger, guardRpcHandler } from "paseo-plugin-helper/server";
-import { pendingList, recentList, verdict } from "../shared/approval";
+import { approvalStatus, pendingList, recentList, verdict } from "../shared/approval";
 
 const log = createPluginLogger("twofado", { banner: false });
 
@@ -46,6 +46,19 @@ interface DaemonRecentItem {
 
 interface DaemonRecentList {
   items: DaemonRecentItem[];
+}
+
+interface DaemonStatusResponse {
+  id: string;
+  status: string;
+  argv?: string[];
+  cwd?: string;
+  uid?: number;
+  expires_in?: number;
+  decision?: string;
+  by?: string;
+  exit: number;
+  output?: string;
 }
 
 function callDaemonOn(sock: string, message: unknown, timeoutMs: number): Promise<unknown> {
@@ -181,4 +194,42 @@ export const submitVerdict = guardRpcHandler(submitVerdictInner, {
   maxInflight: 4,
   onTimeout: (info) => log.warn("verdict timed out", info),
   onSaturated: (info) => log.warn("verdict saturated, shedding load", info),
+});
+
+async function statusInner(
+  input?: RpcInput<typeof approvalStatus>,
+): Promise<RpcOutput<typeof approvalStatus>> {
+  if (!input?.id) {
+    return { id: "", status: "not_found", exit: -1 };
+  }
+  try {
+    const raw = (await callDaemon(
+      { status: { id: input.id } },
+      input.socketPath,
+    )) as DaemonStatusResponse;
+    const validStatuses = ["not_found", "pending", "running", "completed", "denied", "timeout"] as const;
+    const rawStatus = raw?.status as (typeof validStatuses)[number];
+    const status = validStatuses.includes(rawStatus) ? rawStatus : "not_found";
+    return {
+      id: raw?.id ?? input.id,
+      status,
+      decision: raw?.decision,
+      by: raw?.by,
+      exit: typeof raw?.exit === "number" ? raw.exit : -1,
+      output: typeof raw?.output === "string" ? raw.output : "",
+      argv: Array.isArray(raw?.argv) ? raw.argv : undefined,
+      cwd: raw?.cwd,
+      expiresIn: raw?.expires_in,
+    };
+  } catch (err) {
+    log.warn("status fetch failed", { id: input.id, error: err });
+    return { id: input.id, status: "not_found", exit: -1 };
+  }
+}
+
+export const getStatus = guardRpcHandler(statusInner, {
+  timeoutMs: 5000,
+  maxInflight: 4,
+  onTimeout: (info) => log.warn("status timed out", info),
+  onSaturated: (info) => log.warn("status saturated, shedding load", info),
 });

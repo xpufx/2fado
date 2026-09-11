@@ -77,3 +77,29 @@ func Verdict(sock, decision, id string) int {
 	fmt.Printf("{recorded: %v}\n", ack.Recorded)
 	return 0
 }
+
+// Status queries the state and execution outcome of a request id.
+func Status(sock, id string) int {
+	raw, err := call(sock, protocol.ClientMessage{
+		Status: &protocol.StatusRequest{ID: id},
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "2fado: "+err.Error())
+		return 1
+	}
+	var res protocol.StatusResponse
+	if err := json.Unmarshal(raw, &res); err != nil {
+		fmt.Fprintln(os.Stderr, "2fado: bad reply")
+		return 1
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(res)
+	if res.Status == "completed" {
+		return res.Exit
+	}
+	if res.Status == "not_found" || res.Status == "denied" || res.Status == "timeout" {
+		return 1
+	}
+	return 0
+}

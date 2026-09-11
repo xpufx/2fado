@@ -9,16 +9,24 @@ import {
   Badge,
   Button,
   Card,
-  CardHeader,
   CodeBlock,
+  Collapsible,
+  EmptyState,
   PluginThemeProvider,
+  copyToClipboard,
   usePluginSettings,
   usePluginTheme,
 } from "paseo-plugin-helper/client";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
-import { Text, View } from "react-native";
-import { approvalSettings, pendingList, recentList, verdict } from "../shared/approval";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
+import { Platform, Pressable, Text, View } from "react-native";
+import {
+  approvalSettings,
+  approvalStatus,
+  pendingList,
+  recentList,
+  verdict,
+} from "../shared/approval";
 
 const LIST_KEY = ["twofado", "pending"];
 const RECENT_KEY = ["twofado", "recent"];
@@ -26,6 +34,7 @@ const POLL_MS = 3000;
 const RECENT_POLL_MS = 5000;
 const RECENT_LIMIT = 10;
 const OUTPUT_PREVIEW = 2000;
+const EXPIRY_URGENT_S = 30;
 
 const seenIds = new Set<string>();
 const SEEN_IDS_CAP = 500;
@@ -111,43 +120,305 @@ export function ApprovalHeaderIcon(props: PluginButtonIconProps) {
   );
 }
 
+function commandLine(argv: string[]): string {
+  return argv.map((arg) => (arg.includes(" ") ? JSON.stringify(arg) : arg)).join(" ");
+}
+
+function CommandBox({ argv }: { argv: string[] }) {
+  const { colors } = usePluginTheme();
+  const toast = useToast();
+  const [copied, setCopied] = useState(false);
+  const code = commandLine(argv);
+  const [prog, ...rest] = argv;
+
+  const handleCopy = async () => {
+    const ok = await copyToClipboard(code, { toast, toastMessage: "Command" });
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const fontFamily = Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" });
+
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        backgroundColor: colors.surface2,
+        borderColor: colors.border,
+        borderWidth: 1,
+        borderRadius: 6,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        gap: 8,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", flex: 1, overflow: "hidden", gap: 6 }}>
+        <Text style={{ color: colors.statusWarning, fontWeight: "700", fontFamily, fontSize: 12 }}>
+          $
+        </Text>
+        <Text
+          selectable
+          numberOfLines={2}
+          style={{ color: colors.foreground, fontFamily, fontSize: 12, flex: 1 }}
+        >
+          <Text style={{ fontWeight: "700", color: colors.foreground }}>{prog ?? ""}</Text>
+          {rest.length > 0 ? (
+            <Text style={{ color: colors.foregroundMuted }}>
+              {" " + rest.map((a) => (a.includes(" ") ? JSON.stringify(a) : a)).join(" ")}
+            </Text>
+          ) : null}
+        </Text>
+      </View>
+      <Pressable
+        onPress={handleCopy}
+        accessibilityRole="button"
+        accessibilityLabel="Copy command"
+        hitSlop={8}
+        style={({ pressed }) => ({
+          padding: 3,
+          borderRadius: 4,
+          backgroundColor: pressed ? colors.surface1 : "transparent",
+        })}
+      >
+        <Icon
+          name={copied ? "Check" : "Copy"}
+          size={13}
+          color={copied ? colors.statusSuccess : colors.foregroundMuted}
+        />
+      </Pressable>
+    </View>
+  );
+}
+
+function SectionHeader({ title, count }: { title: string; count?: number }) {
+  const { colors } = usePluginTheme();
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8, marginBottom: 2 }}>
+      <Text
+        style={{
+          color: colors.foregroundMuted,
+          fontSize: 11,
+          fontWeight: "700",
+          textTransform: "uppercase",
+          letterSpacing: 0.8,
+        }}
+      >
+        {title}
+      </Text>
+      {count !== undefined ? (
+        <Badge
+          label={String(count)}
+          variant={count > 0 ? "warning" : "neutral"}
+          styleVariant={count > 0 ? "solid" : "tinted"}
+        />
+      ) : null}
+    </View>
+  );
+}
+
 function ApprovalItem({
   item,
-  pending,
+  deciding,
   onDecide,
 }: {
   item: { id: string; argv: string[]; host: string; caller: string; cwd: string; expiresIn: number };
-  pending: boolean;
-  onDecide(id: string, decision: "approve" | "deny"): void;
+  deciding?: "approve" | "deny";
+  onDecide(item: { id: string; argv: string[]; cwd: string }, decision: "approve" | "deny"): void;
 }) {
   const { colors } = usePluginTheme();
+  const [program] = item.argv;
+  const urgent = item.expiresIn <= EXPIRY_URGENT_S;
+  const fontFamily = Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" });
+  const isDeciding = Boolean(deciding);
+
   return (
-    <Card>
-      <CardHeader
-        title={item.argv.map((arg) => JSON.stringify(arg)).join(" ")}
-        subtitle={`${item.host} · caller ${item.caller} · expires in ${item.expiresIn}s`}
-        icon="Terminal"
-      />
-      <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>{item.cwd}</Text>
-      <View style={{ flexDirection: "row", gap: 8 }}>
+    <Card
+      variant="elevated"
+      style={{
+        borderLeftWidth: 4,
+        borderLeftColor: urgent ? colors.statusDanger : colors.statusWarning,
+        gap: 8,
+        padding: 12,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+          <View
+            style={{
+              width: 22,
+              height: 22,
+              borderRadius: 4,
+              backgroundColor: urgent ? colors.statusDanger : colors.statusWarning,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Icon name="Terminal" size={12} color="#ffffff" />
+          </View>
+          <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "700", flex: 1 }}>
+            {program ?? "(empty)"}
+          </Text>
+        </View>
+        <Badge
+          label={urgent ? `expires in ${item.expiresIn}s` : `${item.expiresIn}s left`}
+          variant={urgent ? "danger" : "warning"}
+          styleVariant="solid"
+          icon="Timer"
+        />
+      </View>
+
+      <CommandBox argv={item.argv} />
+
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: 6,
+        }}
+      >
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+          <Icon name="User" size={11} color={colors.foregroundMuted} />
+          <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>
+            Caller <Text style={{ color: colors.foreground, fontWeight: "600" }}>{item.caller}</Text> on{" "}
+            <Text style={{ color: colors.foreground, fontWeight: "600" }}>{item.host}</Text>
+          </Text>
+        </View>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 4, maxWidth: 280 }}>
+          <Icon name="Folder" size={11} color={colors.foregroundMuted} />
+          <Text
+            numberOfLines={1}
+            ellipsizeMode="middle"
+            style={{ color: colors.foregroundMuted, fontSize: 11, fontFamily }}
+          >
+            {item.cwd}
+          </Text>
+        </View>
+      </View>
+
+      <View style={{ flexDirection: "row", gap: 8, paddingTop: 2 }}>
         <View style={{ flex: 1 }}>
           <Button
             label="Approve"
             variant="primary"
+            size="sm"
+            icon="Check"
             accessibilityLabel={`Approve ${item.id}`}
-            disabled={pending}
-            onPress={() => onDecide(item.id, "approve")}
+            loading={deciding === "approve"}
+            disabled={isDeciding}
+            onPress={() => onDecide(item, "approve")}
           />
         </View>
         <View style={{ flex: 1 }}>
           <Button
             label="Deny"
             variant="danger"
+            size="sm"
+            icon="X"
             accessibilityLabel={`Deny ${item.id}`}
-            disabled={pending}
-            onPress={() => onDecide(item.id, "deny")}
+            loading={deciding === "deny"}
+            disabled={isDeciding}
+            onPress={() => onDecide(item, "deny")}
           />
         </View>
+      </View>
+    </Card>
+  );
+}
+
+function ExecutingItem({
+  item,
+}: {
+  item: {
+    id: string;
+    argv?: string[];
+    cwd?: string;
+    status: string;
+    exit?: number;
+    output?: string;
+  };
+}) {
+  const { colors } = usePluginTheme();
+  const [program] = item.argv ?? ["(command)"];
+  const isCompleted = item.status === "completed";
+  const isFailed = isCompleted && item.exit !== 0;
+  const isSuccess = isCompleted && item.exit === 0;
+
+  const statusColor = isSuccess
+    ? colors.statusSuccess
+    : isFailed
+      ? colors.statusWarning
+      : colors.accent;
+
+  const fontFamily = Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" });
+
+  return (
+    <Card
+      variant="elevated"
+      style={{
+        borderLeftWidth: 4,
+        borderLeftColor: statusColor,
+        gap: 8,
+        padding: 12,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+          <View
+            style={{
+              width: 22,
+              height: 22,
+              borderRadius: 4,
+              backgroundColor: statusColor,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Icon
+              name={isSuccess ? "Check" : isFailed ? "AlertTriangle" : "Activity"}
+              size={12}
+              color="#ffffff"
+            />
+          </View>
+          <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "700", flex: 1 }}>
+            {program}
+          </Text>
+        </View>
+        <Badge
+          label={isSuccess ? `exit ${item.exit}` : isFailed ? `exit ${item.exit}` : "running…"}
+          variant={isSuccess ? "success" : isFailed ? "warning" : "accent"}
+          styleVariant="solid"
+          icon={isSuccess ? "Check" : isFailed ? "AlertTriangle" : "Activity"}
+        />
+      </View>
+
+      {item.argv && item.argv.length > 0 ? <CommandBox argv={item.argv} /> : null}
+
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+        {item.cwd ? (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 4, maxWidth: 280 }}>
+            <Icon name="Folder" size={11} color={colors.foregroundMuted} />
+            <Text
+              numberOfLines={1}
+              ellipsizeMode="middle"
+              style={{ color: colors.foregroundMuted, fontSize: 11, fontFamily }}
+            >
+              {item.cwd}
+            </Text>
+          </View>
+        ) : null}
+        <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>
+          {isCompleted
+            ? isSuccess
+              ? "Executed successfully"
+              : `Failed with exit ${item.exit}`
+            : "Executing on host…"}
+        </Text>
       </View>
     </Card>
   );
@@ -169,34 +440,72 @@ function RecentItem({
   const { colors } = usePluginTheme();
   const approved = item.decision === "approve";
   const executed = item.exit >= 0;
+  const failed = executed && item.exit !== 0;
   const preview =
     item.output.length > OUTPUT_PREVIEW
       ? `${item.output.slice(0, OUTPUT_PREVIEW)}\n…[truncated]`
       : item.output;
+  const [program] = item.argv;
+  const statusColor = !approved
+    ? colors.statusDanger
+    : failed
+      ? colors.statusWarning
+      : colors.statusSuccess;
+
+  const fontFamily = Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" });
+
   return (
-    <Card>
-      <CardHeader
-        title={item.argv.map((arg) => JSON.stringify(arg)).join(" ")}
-        subtitle={`${item.decision} · ${executed ? `exit ${item.exit}` : "not executed"} · by ${item.by || "?"}`}
-        icon="Terminal"
-      />
-      <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>{item.cwd}</Text>
-      <Badge
-        label={approved ? (executed && item.exit !== 0 ? `approved · exit ${item.exit}` : "approved") : item.decision}
-        variant={approved ? (executed && item.exit !== 0 ? "warning" : "success") : "danger"}
-        icon={approved ? "Check" : "X"}
-      />
-      {executed ? (
-        preview.length > 0 ? (
-          <CodeBlock code={preview} />
-        ) : (
-          <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>(no output)</Text>
-        )
-      ) : (
-        <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
-          No output — denied before execution.
+    <Card
+      style={{
+        borderLeftWidth: 3,
+        borderLeftColor: statusColor,
+        gap: 6,
+        padding: 10,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1 }}>
+          <Icon
+            name={approved ? (failed ? "AlertTriangle" : "Check") : "X"}
+            size={13}
+            color={statusColor}
+          />
+          <Text style={{ color: colors.foreground, fontSize: 13, fontWeight: "600" }}>
+            {program ?? "(empty)"}
+          </Text>
+          <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>
+            · {item.by ? `by ${item.by}` : "local"}
+          </Text>
+        </View>
+        <Badge
+          label={approved ? (executed ? `exit ${item.exit}` : "approved") : "denied"}
+          variant={approved ? (failed ? "warning" : "success") : "danger"}
+          styleVariant="tinted"
+        />
+      </View>
+
+      <CommandBox argv={item.argv} />
+
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+        <Icon name="Folder" size={11} color={colors.foregroundMuted} />
+        <Text
+          numberOfLines={1}
+          ellipsizeMode="middle"
+          style={{ color: colors.foregroundMuted, fontSize: 11, fontFamily }}
+        >
+          {item.cwd}
         </Text>
-      )}
+      </View>
+
+      {executed && preview.trim().length > 0 ? (
+        <Collapsible
+          title={failed ? `Output · exit ${item.exit}` : "Output"}
+          icon="ScrollText"
+          initiallyExpanded={false}
+        >
+          <CodeBlock code={preview} maxHeight={180} />
+        </Collapsible>
+      ) : null}
     </Card>
   );
 }
@@ -211,81 +520,281 @@ export function ApprovalSurface({
   const recent = useRecentList();
   const socketPath = useSocketPath();
   const decide = useRpc(verdict);
+  const getStatus = useRpc(approvalStatus);
   const queryClient = useQueryClient();
-  const mutation = useMutation({
-    mutationFn: (input: { id: string; decision: "approve" | "deny" }) =>
-      decide({ ...input, socketPath }),
-    onSuccess: (result, input) => {
-      if (result.recorded) {
-        toast.show(input.decision === "approve" ? "Approved — executing" : "Denied", {
-          variant: input.decision === "approve" ? "success" : "default",
-        });
-      } else {
-        toast.error("Already decided or 2fadod unreachable.");
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const [decidingMap, setDecidingMap] = useState<Record<string, "approve" | "deny">>({});
+  const [activeExecutions, setActiveExecutions] = useState<
+    Record<
+      string,
+      {
+        id: string;
+        decision: "approve" | "deny";
+        status: "running" | "completed" | "denied" | "timeout" | "not_found";
+        argv?: string[];
+        cwd?: string;
+        exit?: number;
+        output?: string;
       }
+    >
+  >({});
+
+  const handleDecide = async (
+    item: { id: string; argv: string[]; cwd: string },
+    decision: "approve" | "deny",
+  ) => {
+    const { id } = item;
+    setDecidingMap((prev) => ({ ...prev, [id]: decision }));
+
+    try {
+      const res = await decide({ id, decision, socketPath });
+      if (!isMountedRef.current) return;
+
+      if (!res.recorded) {
+        setDecidingMap((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+        toast.error("Already decided or 2fadod unreachable.");
+        void queryClient.invalidateQueries({ queryKey: LIST_KEY });
+        void queryClient.invalidateQueries({ queryKey: RECENT_KEY });
+        return;
+      }
+
+      setDecidingMap((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
       void queryClient.invalidateQueries({ queryKey: LIST_KEY });
-      void queryClient.invalidateQueries({ queryKey: RECENT_KEY });
-    },
-    onError: () => toast.error("Verdict failed — 2fadod unreachable."),
-  });
+
+      if (decision === "deny") {
+        toast.show("Denied command", { variant: "default" });
+        void queryClient.invalidateQueries({ queryKey: RECENT_KEY });
+        return;
+      }
+
+      // If approved, track in activeExecutions and poll status
+      setActiveExecutions((prev) => ({
+        ...prev,
+        [id]: {
+          id,
+          decision: "approve",
+          status: "running",
+          argv: item.argv,
+          cwd: item.cwd,
+        },
+      }));
+
+      // Start targeted polling for this request
+      void (async () => {
+        await new Promise((r) => setTimeout(r, 250));
+        const maxAttempts = 60; // 60 * 350ms ~ 21s
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          if (!isMountedRef.current) return;
+          try {
+            const statusRes = await getStatus({ id, socketPath });
+            if (!isMountedRef.current) return;
+
+            if (statusRes.status === "completed") {
+              setActiveExecutions((prev) => ({
+                ...prev,
+                [id]: {
+                  id,
+                  decision: "approve",
+                  status: "completed",
+                  argv: statusRes.argv ?? item.argv,
+                  cwd: statusRes.cwd ?? item.cwd,
+                  exit: statusRes.exit,
+                  output: statusRes.output,
+                },
+              }));
+              void queryClient.invalidateQueries({ queryKey: RECENT_KEY });
+
+              const prog = statusRes.argv?.[0] ?? item.argv[0] ?? "Command";
+              if (statusRes.exit === 0) {
+                toast.show(`${prog} completed (exit 0)`, { variant: "success" });
+              } else {
+                toast.show(`${prog} failed (exit ${statusRes.exit})`, { variant: "warning" });
+              }
+
+              // Keep card visible briefly to show final exit badge, then clean up
+              setTimeout(() => {
+                if (!isMountedRef.current) return;
+                setActiveExecutions((prev) => {
+                  const next = { ...prev };
+                  delete next[id];
+                  return next;
+                });
+              }, 800);
+              return;
+            }
+
+            if (
+              statusRes.status === "denied" ||
+              statusRes.status === "timeout" ||
+              statusRes.status === "not_found"
+            ) {
+              void queryClient.invalidateQueries({ queryKey: RECENT_KEY });
+              setActiveExecutions((prev) => {
+                const next = { ...prev };
+                delete next[id];
+                return next;
+              });
+              if (statusRes.status === "timeout") {
+                toast.error("Execution timed out");
+              }
+              return;
+            }
+          } catch {
+            // Transient error; continue polling
+          }
+          await new Promise((r) => setTimeout(r, 350));
+        }
+
+        // Timeout polling fallback
+        if (isMountedRef.current) {
+          void queryClient.invalidateQueries({ queryKey: RECENT_KEY });
+          setActiveExecutions((prev) => {
+            const next = { ...prev };
+            delete next[id];
+            return next;
+          });
+        }
+      })();
+    } catch {
+      if (!isMountedRef.current) return;
+      setDecidingMap((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      toast.error("Verdict failed — 2fadod unreachable.");
+    }
+  };
 
   useNewPendingToast(query.data?.items);
 
   const items = query.data?.items ?? [];
   const recentItems = recent.data?.items ?? [];
+  const activeList = Object.values(activeExecutions);
 
   return (
     <PluginThemeProvider theme={{ colors: theme.colors }} layout={layout}>
-      <ScrollView style={{ flex: 1, backgroundColor: theme.colors.surface0 }}>
-        <View style={{ padding: layout.compact ? 16 : 24, gap: 10 }}>
-          <Card>
-            <CardHeader title="2fado approvals" icon="ShieldCheck" />
-            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
-              Pending 2fado requests wait here until you approve or deny them. Nothing listed
-              means nothing waiting. Anyone holding this app can approve — real gating belongs
-              in 2fadod.
-            </Text>
+      <ScrollView
+        style={{ flex: 1, backgroundColor: theme.colors.surface0 }}
+        contentContainerStyle={{
+          alignItems: "center",
+          padding: layout.compact ? 12 : 20,
+        }}
+      >
+        <View style={{ width: "100%", maxWidth: 640, alignSelf: "center", gap: 10 }}>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              paddingVertical: 6,
+              borderBottomWidth: 1,
+              borderBottomColor: theme.colors.border,
+              marginBottom: 2,
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <View
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 6,
+                  backgroundColor: theme.colors.surface1,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  borderWidth: 1,
+                  borderColor: theme.colors.border,
+                }}
+              >
+                <Icon name="ShieldCheck" size={17} color={theme.colors.accent} />
+              </View>
+              <View>
+                <Text style={{ color: theme.colors.foreground, fontSize: 15, fontWeight: "700" }}>
+                  2fado approvals
+                </Text>
+                <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
+                  Privileged command gating
+                </Text>
+              </View>
+            </View>
             <Button
-              label="2fado settings: socket path, Telegram fallback"
+              label="Settings"
               variant="secondary"
+              size="sm"
+              icon="Settings"
               accessibilityLabel="Open 2fado settings"
               onPress={onOpenSettings}
             />
-          </Card>
+          </View>
+
+          <SectionHeader title="Pending" count={query.data ? items.length : undefined} />
           {query.isPending ? (
-            <Text style={{ color: theme.colors.foreground, fontSize: 13 }}>Loading…</Text>
+            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>Loading…</Text>
           ) : null}
           {query.isError ? (
-            <Text style={{ color: theme.colors.foreground, fontSize: 13 }}>
-              2fadod unreachable — check the socket path in settings.
-            </Text>
+            <Card style={{ borderLeftWidth: 3, borderLeftColor: theme.colors.statusDanger }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Icon name="CloudOff" size={16} color={theme.colors.statusDanger} />
+                <Text style={{ color: theme.colors.foreground, fontSize: 13, fontWeight: "600" }}>
+                  2fadod unreachable
+                </Text>
+              </View>
+              <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, marginTop: 4 }}>
+                Check the socket path in settings.
+              </Text>
+            </Card>
           ) : null}
-          {!query.isPending && !query.isError && items.length === 0 ? (
-            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
-              Nothing pending.
-            </Text>
+          {!query.isPending && !query.isError && items.length === 0 && activeList.length === 0 ? (
+            <EmptyState
+              icon="ShieldCheck"
+              title="All clear"
+              description="No commands waiting for authorization."
+            />
           ) : null}
           {items.map((item) => (
             <ApprovalItem
               key={item.id}
               item={item}
-              pending={mutation.isPending}
-              onDecide={(id, decision) => mutation.mutate({ id, decision })}
+              deciding={decidingMap[item.id]}
+              onDecide={(target, decision) => handleDecide(target, decision)}
             />
           ))}
-          <Card>
-            <CardHeader title="Recent approvals" icon="History" />
-            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
-              Decided requests with their exit status and execution output.
-            </Text>
-          </Card>
+
+          {activeList.length > 0 ? (
+            <>
+              <SectionHeader title="In flight" count={activeList.length} />
+              {activeList.map((item) => (
+                <ExecutingItem key={item.id} item={item} />
+              ))}
+            </>
+          ) : null}
+
+          <SectionHeader title="Recent" />
           {recent.isPending ? (
-            <Text style={{ color: theme.colors.foreground, fontSize: 13 }}>Loading…</Text>
+            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>Loading…</Text>
           ) : null}
           {!recent.isPending && recentItems.length === 0 ? (
-            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
-              Nothing decided yet.
-            </Text>
+            <EmptyState
+              icon="History"
+              title="No history yet"
+              description="Decided requests will appear here with execution status and output."
+            />
           ) : null}
           {recentItems.map((item) => (
             <RecentItem key={item.id} item={item} />

@@ -30,6 +30,27 @@ type ClientMessage struct {
 	Verdict *VerdictSubmit `json:"verdict,omitempty"`
 	List    *ListRequest   `json:"list,omitempty"`
 	Recent  *RecentRequest `json:"recent,omitempty"`
+	Status  *StatusRequest `json:"status,omitempty"`
+}
+
+// StatusRequest asks for the state and outcome of a specific request.
+type StatusRequest struct {
+	ID string `json:"id"`
+}
+
+// StatusResponse is the answer to a StatusRequest.
+// Status is one of: not_found | pending | running | completed | denied | timeout.
+type StatusResponse struct {
+	ID        string   `json:"id"`
+	Status    string   `json:"status"`
+	Argv      []string `json:"argv,omitempty"`
+	Cwd       string   `json:"cwd,omitempty"`
+	UID       uint32   `json:"uid,omitempty"`
+	ExpiresIn int64    `json:"expires_in,omitempty"`
+	Decision  string   `json:"decision,omitempty"`
+	By        string   `json:"by,omitempty"`
+	Exit      int      `json:"exit"`
+	Output    string   `json:"output,omitempty"`
 }
 
 // ListRequest asks for pending records (plugin server polls this).

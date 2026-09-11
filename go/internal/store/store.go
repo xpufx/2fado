@@ -202,6 +202,86 @@ func (s Store) Recent(limit int) []protocol.RecentItem {
 	return out
 }
 
+// Status returns the current state and result (if available) for a specific request ID.
+func (s Store) Status(rid string, now int64) protocol.StatusResponse {
+	rec, err := s.Load(rid)
+	if err != nil {
+		return protocol.StatusResponse{ID: rid, Status: "not_found", Exit: -1}
+	}
+	v := s.Verdict(rid)
+	if v == nil {
+		if rec.Expires > now {
+			return protocol.StatusResponse{
+				ID:        rid,
+				Status:    "pending",
+				Argv:      rec.Argv,
+				Cwd:       rec.Cwd,
+				UID:       rec.UID,
+				ExpiresIn: rec.Expires - now,
+				Exit:      -1,
+			}
+		}
+		return protocol.StatusResponse{
+			ID:     rid,
+			Status: "timeout",
+			Argv:   rec.Argv,
+			Cwd:    rec.Cwd,
+			UID:    rec.UID,
+			Exit:   -1,
+		}
+	}
+
+	resultPath := filepath.Join(s.Pending, rid+".result")
+	data, err := os.ReadFile(resultPath)
+	if err != nil {
+		// Verdict recorded, but result file not yet written (command running)
+		if v.Decision == "approve" {
+			return protocol.StatusResponse{
+				ID:       rid,
+				Status:   "running",
+				Decision: v.Decision,
+				By:       v.By,
+				Argv:     rec.Argv,
+				Cwd:      rec.Cwd,
+				UID:      rec.UID,
+				Exit:     -1,
+			}
+		}
+		return protocol.StatusResponse{
+			ID:       rid,
+			Status:   v.Decision,
+			Decision: v.Decision,
+			By:       v.By,
+			Argv:     rec.Argv,
+			Cwd:      rec.Cwd,
+			UID:      rec.UID,
+			Exit:     -1,
+		}
+	}
+
+	var r protocol.RecentItem
+	if err := json.Unmarshal(data, &r); err != nil {
+		r.Exit = -1
+	}
+	status := "completed"
+	if v.Decision == "deny" {
+		status = "denied"
+	} else if v.Decision == "timeout" {
+		status = "timeout"
+	}
+	return protocol.StatusResponse{
+		ID:       rid,
+		Status:   status,
+		Decision: v.Decision,
+		By:       v.By,
+		Argv:     rec.Argv,
+		Cwd:      rec.Cwd,
+		UID:      rec.UID,
+		Exit:     r.Exit,
+		Output:   r.Output,
+	}
+}
+
 func (s Store) Append(ev protocol.AuditEvent) {
 	ev.TS = time.Now().UTC().Format(time.RFC3339)
 	data, err := json.Marshal(ev)

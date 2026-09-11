@@ -52,6 +52,26 @@ export const recentList = defineContract({
   description: "List recently decided 2fado requests with execution results",
 });
 
+export const approvalStatus = defineContract({
+  name: "approval.status",
+  input: z.object({
+    id: z.string().min(1),
+    socketPath: z.string().min(1).optional(),
+  }),
+  output: z.object({
+    id: z.string(),
+    status: z.enum(["not_found", "pending", "running", "completed", "denied", "timeout"]),
+    argv: z.array(z.string()).optional(),
+    cwd: z.string().optional(),
+    expiresIn: z.number().optional(),
+    decision: z.string().optional(),
+    by: z.string().optional(),
+    exit: z.number(),
+    output: z.string().optional(),
+  }),
+  description: "Query status and execution outcome of a 2fado request by ID",
+});
+
 const settingsSchema = z.object({
   socketPath: z
     .string()

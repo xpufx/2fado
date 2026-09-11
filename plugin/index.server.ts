@@ -1,7 +1,7 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { PluginStorage, createPluginLogger, registerSettingsRpc } from "paseo-plugin-helper/server";
-import { approvalSettings, pendingList, recentList, verdict } from "./shared/approval";
-import { listPending, listRecent, submitVerdict } from "./server/fado";
+import { approvalSettings, approvalStatus, pendingList, recentList, verdict } from "./shared/approval";
+import { getStatus, listPending, listRecent, submitVerdict } from "./server/fado";
 
 const log = createPluginLogger("twofado");
 
@@ -16,5 +16,6 @@ export default function contribute(server: PluginServerContext) {
   server.handle(pendingList, (input) => listPending(input));
   server.handle(verdict, (input) => submitVerdict(input));
   server.handle(recentList, (input) => listRecent(input));
+  server.handle(approvalStatus, (input) => getStatus(input));
   return () => {};
 }

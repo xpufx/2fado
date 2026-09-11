@@ -3,6 +3,7 @@
 //	2fado daemon            run the privileged service
 //	2fado run -- <argv...>  petition to execute
 //	2fado approve|deny <id> local verdict (PoC; production: SSO-bound UI)
+//	2fado status <id>       inspect state and execution result
 package main
 
 import (
@@ -16,7 +17,7 @@ import (
 )
 
 func usage() int {
-	fmt.Println("usage: 2fado daemon | 2fado run -- <argv...> | 2fado approve|deny <id>")
+	fmt.Println("usage: 2fado daemon | 2fado run -- <argv...> | 2fado approve|deny <id> | 2fado status <id>")
 	return 2
 }
 
@@ -52,6 +53,11 @@ func main() {
 			os.Exit(usage())
 		}
 		os.Exit(client.Verdict(sock, os.Args[1], os.Args[2]))
+	case "status":
+		if len(os.Args) != 3 {
+			os.Exit(usage())
+		}
+		os.Exit(client.Status(sock, os.Args[2]))
 	default:
 		os.Exit(usage())
 	}

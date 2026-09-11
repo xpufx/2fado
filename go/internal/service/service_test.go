@@ -105,3 +105,65 @@ func TestRunDenyTierRefusesWithoutExec(t *testing.T) {
 		t.Fatalf("deny tier = %+v, want denied/policy", res)
 	}
 }
+
+func TestStatusLifecycle(t *testing.T) {
+	svc := testService(t, policy.Policy{Default: "ask"})
+
+	// 1. not_found
+	st := svc.Status("unknown-id")
+	if st.Status != "not_found" {
+		t.Fatalf("Status(unknown) = %q, want not_found", st.Status)
+	}
+
+	// 2. pending
+	rid := "req-1"
+	rec := protocol.PendingRecord{
+		Argv:    []string{"/bin/echo", "test"},
+		UID:     1000,
+		Cwd:     "/tmp",
+		Expires: 9999999999,
+	}
+	if err := svc.Store.Save(rec, rid); err != nil {
+		t.Fatal(err)
+	}
+	st = svc.Status(rid)
+	if st.Status != "pending" || st.ExpiresIn <= 0 || st.Argv[0] != "/bin/echo" {
+		t.Fatalf("Status(pending) = %+v", st)
+	}
+
+	// 3. running (verdict consumed, but no result file yet)
+	if !svc.Store.Consume(rid, "approve", "test-user") {
+		t.Fatal("Consume failed")
+	}
+	st = svc.Status(rid)
+	if st.Status != "running" || st.Decision != "approve" || st.By != "test-user" {
+		t.Fatalf("Status(running) = %+v", st)
+	}
+
+	// 4. completed (result file written)
+	svc.Store.SaveResult(rid, 0, "hello world")
+	st = svc.Status(rid)
+	if st.Status != "completed" || st.Exit != 0 || st.Output != "hello world" {
+		t.Fatalf("Status(completed) = %+v", st)
+	}
+
+	// 5. denied
+	rid2 := "req-2"
+	rec2 := protocol.PendingRecord{Argv: []string{"/bin/ls"}, UID: 1000, Cwd: "/tmp", Expires: 9999999999}
+	_ = svc.Store.Save(rec2, rid2)
+	_ = svc.Store.Consume(rid2, "deny", "admin")
+	svc.Store.SaveResult(rid2, -1, "")
+	st = svc.Status(rid2)
+	if st.Status != "denied" || st.Decision != "deny" || st.Exit != -1 {
+		t.Fatalf("Status(denied) = %+v", st)
+	}
+
+	// 6. timeout
+	rid3 := "req-3"
+	rec3 := protocol.PendingRecord{Argv: []string{"/bin/ls"}, UID: 1000, Cwd: "/tmp", Expires: 100}
+	_ = svc.Store.Save(rec3, rid3)
+	st = svc.Status(rid3)
+	if st.Status != "timeout" || st.Exit != -1 {
+		t.Fatalf("Status(timeout) = %+v", st)
+	}
+}
