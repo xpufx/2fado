@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sync"
 
 	"2fado/internal/protocol"
 	"2fado/internal/service"
@@ -77,7 +78,14 @@ func handle(svc service.Service, c net.Conn) {
 		ack := svc.Submit(*msg.Verdict)
 		out, _ = json.Marshal(ack)
 	case msg.Run != nil:
-		res := svc.Run(*msg.Run, peerUID(c))
+		disconnect := make(chan struct{})
+		var once sync.Once
+		go func() {
+			var b [1]byte
+			_, _ = c.Read(b[:])
+			once.Do(func() { close(disconnect) })
+		}()
+		res := svc.RunWithCancel(*msg.Run, peerUID(c), disconnect)
 		out, _ = json.Marshal(res)
 	case msg.List != nil:
 		out, _ = json.Marshal(svc.List())

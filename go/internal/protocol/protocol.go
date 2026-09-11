@@ -39,7 +39,7 @@ type StatusRequest struct {
 }
 
 // StatusResponse is the answer to a StatusRequest.
-// Status is one of: not_found | pending | running | completed | denied | timeout.
+// Status is one of: not_found | pending | confirming | running | completed | denied | timeout | client_aborted.
 type StatusResponse struct {
 	ID        string   `json:"id"`
 	Status    string   `json:"status"`
@@ -51,6 +51,8 @@ type StatusResponse struct {
 	By        string   `json:"by,omitempty"`
 	Exit      int      `json:"exit"`
 	Output    string   `json:"output,omitempty"`
+	Step      string   `json:"step,omitempty"`
+	ConfirmOf string   `json:"confirm_of,omitempty"`
 }
 
 // ListRequest asks for pending records (plugin server polls this).
@@ -63,6 +65,8 @@ type PendingItem struct {
 	UID       uint32   `json:"uid"`
 	Cwd       string   `json:"cwd"`
 	ExpiresIn int64    `json:"expires_in"`
+	Step      string   `json:"step,omitempty"`
+	ConfirmOf string   `json:"confirm_of,omitempty"`
 }
 
 // PendingList answers ListRequest: unexpired, undecided records only.
@@ -78,13 +82,15 @@ type RecentRequest struct {
 // RecentItem is one decided record with its verdict and execution result.
 // Exit is -1 and Output empty when nothing executed (denied/timeout).
 type RecentItem struct {
-	ID       string   `json:"id"`
-	Argv     []string `json:"argv"`
-	Cwd      string   `json:"cwd"`
-	Decision string   `json:"decision"`
-	By       string   `json:"by,omitempty"`
-	Exit     int      `json:"exit"`
-	Output   string   `json:"output,omitempty"`
+	ID        string   `json:"id"`
+	Argv      []string `json:"argv"`
+	Cwd       string   `json:"cwd"`
+	Decision  string   `json:"decision"`
+	By        string   `json:"by,omitempty"`
+	Exit      int      `json:"exit"`
+	Output    string   `json:"output,omitempty"`
+	Step      string   `json:"step,omitempty"`
+	ConfirmOf string   `json:"confirm_of,omitempty"`
 }
 
 // RecentList answers RecentRequest: decided records, newest first.
@@ -108,12 +114,14 @@ type VerdictAck struct {
 // PendingRecord is the authoritative stored request. Execution reads only
 // this — never anything that crossed a wire.
 type PendingRecord struct {
-	Argv    []string `json:"argv"`
-	UID     uint32   `json:"uid"`
-	Cwd     string   `json:"cwd"`
-	Expires int64    `json:"expires"`
-	ChatID  string   `json:"chat_id,omitempty"`
-	MsgID   int64    `json:"message_id,omitempty"`
+	Argv      []string `json:"argv"`
+	UID       uint32   `json:"uid"`
+	Cwd       string   `json:"cwd"`
+	Expires   int64    `json:"expires"`
+	ChatID    string   `json:"chat_id,omitempty"`
+	MsgID     int64    `json:"message_id,omitempty"`
+	Step      string   `json:"step,omitempty"`
+	ConfirmOf string   `json:"confirm_of,omitempty"`
 }
 
 // VerdictRecord is written once, atomically (O_EXCL): one verdict wins.
@@ -125,7 +133,7 @@ type VerdictRecord struct {
 
 // AuditEvent is one JSON line in the append-only log.
 type AuditEvent struct {
-	Ev         string   `json:"ev"` // request | verdict | allow | exec
+	Ev         string   `json:"ev"` // request | verdict | allow | exec | confirm | confirmation_timeout | client_aborted
 	UID        uint32   `json:"uid,omitempty"`
 	By         string   `json:"by,omitempty"`
 	Argv       []string `json:"argv,omitempty"`
@@ -133,6 +141,8 @@ type AuditEvent struct {
 	Tier       string   `json:"tier,omitempty"`
 	Decision   string   `json:"decision,omitempty"`
 	RID        string   `json:"rid,omitempty"`
+	Step       string   `json:"step,omitempty"`
+	ConfirmOf  string   `json:"confirm_of,omitempty"`
 	AsUID      uint32   `json:"as_uid,omitempty"`
 	Dry        bool     `json:"dry,omitempty"`
 	Exit       int      `json:"exit,omitempty"`

@@ -8,6 +8,10 @@
       "rm",
       "-rf",
       "/"
+    ],
+    [
+      "/bin/echo",
+      "dangerous"
     ]
   ],
   "default": "ask",

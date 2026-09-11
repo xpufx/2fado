@@ -17,6 +17,24 @@ func TestTierWhitelistWinsOverBlacklist(t *testing.T) {
 	}
 }
 
+func TestNeedsConfirm(t *testing.T) {
+	p := Policy{
+		Confirm: [][]string{
+			{"/bin/echo", "dangerous"},
+			{"rm", "-rf", "/"},
+		},
+	}
+	if !p.NeedsConfirm([]string{"/bin/echo", "dangerous"}) {
+		t.Errorf("expected NeedsConfirm for [/bin/echo dangerous]")
+	}
+	if !p.NeedsConfirm([]string{"rm", "-rf", "/"}) {
+		t.Errorf("expected NeedsConfirm for [rm -rf /]")
+	}
+	if p.NeedsConfirm([]string{"/bin/echo", "safe"}) {
+		t.Errorf("unexpected NeedsConfirm for [/bin/echo safe]")
+	}
+}
+
 func TestWhitelistModeIgnoresBlacklistAndDefault(t *testing.T) {
 	p := Policy{
 		Mode:      "whitelist",

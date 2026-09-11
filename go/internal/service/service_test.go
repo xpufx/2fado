@@ -2,6 +2,7 @@ package service
 
 import (
 	"testing"
+	"time"
 
 	"2fado/internal/config"
 	"2fado/internal/policy"
@@ -165,5 +166,258 @@ func TestStatusLifecycle(t *testing.T) {
 	st = svc.Status(rid3)
 	if st.Status != "timeout" || st.Exit != -1 {
 		t.Fatalf("Status(timeout) = %+v", st)
+	}
+}
+
+func TestConfirmLifecycleApproved(t *testing.T) {
+	svc := testService(t, policy.Policy{
+		Confirm: [][]string{{"/bin/echo", "dangerous"}},
+		Default: "ask",
+	})
+	svc.Conf.Timeout = 5
+
+	type runOut struct {
+		res protocol.RunResult
+	}
+	done := make(chan runOut, 1)
+	go func() {
+		res := svc.Run(protocol.RunRequest{
+			Argv: []string{"/bin/echo", "dangerous"},
+			Cwd:  t.TempDir(),
+			Env:  map[string]string{},
+		}, 1000)
+		done <- runOut{res: res}
+	}()
+
+	// 1. Wait for step 1 petition
+	var step1ID string
+	for i := 0; i < 50; i++ {
+		items := svc.Store.List(time.Now().Unix())
+		if len(items) > 0 {
+			step1ID = items[0].ID
+			if items[0].Step != "initial" {
+				t.Fatalf("step 1 Step = %q, want 'initial'", items[0].Step)
+			}
+			if items[0].ConfirmOf != "" {
+				t.Fatalf("step 1 ConfirmOf = %q, want empty", items[0].ConfirmOf)
+			}
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if step1ID == "" {
+		t.Fatal("step 1 petition did not appear")
+	}
+
+	// Approve step 1
+	if !svc.Store.Consume(step1ID, "approve", "operator") {
+		t.Fatal("failed to consume step 1 approval")
+	}
+
+	// 2. Wait for step 2 confirmation petition
+	var step2ID string
+	for i := 0; i < 50; i++ {
+		items := svc.Store.List(time.Now().Unix())
+		for _, it := range items {
+			if it.ID != step1ID && it.ConfirmOf == step1ID {
+				step2ID = it.ID
+				if it.Step != "confirm" {
+					t.Fatalf("step 2 Step = %q, want 'confirm'", it.Step)
+				}
+				break
+			}
+		}
+		if step2ID != "" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if step2ID == "" {
+		t.Fatal("step 2 confirmation petition did not appear")
+	}
+
+	// Verify step 1 status is now "confirming"
+	st1 := svc.Status(step1ID)
+	if st1.Status != "confirming" {
+		t.Fatalf("Status(step1ID) = %q, want 'confirming'", st1.Status)
+	}
+
+	// Approve step 2
+	if !svc.Store.Consume(step2ID, "approve", "operator") {
+		t.Fatal("failed to consume step 2 approval")
+	}
+
+	out := <-done
+	if out.res.Status != "allowed" || out.res.Exit != 0 {
+		t.Fatalf("RunResult = %+v, want allowed exit 0", out.res)
+	}
+
+	// Both step 1 and step 2 must now be completed
+	st1Final := svc.Status(step1ID)
+	if st1Final.Status != "completed" || st1Final.Exit != 0 {
+		t.Fatalf("step 1 final status = %+v, want completed exit 0", st1Final)
+	}
+	st2Final := svc.Status(step2ID)
+	if st2Final.Status != "completed" || st2Final.Exit != 0 {
+		t.Fatalf("step 2 final status = %+v, want completed exit 0", st2Final)
+	}
+}
+
+func TestConfirmLifecycleTimeout(t *testing.T) {
+	svc := testService(t, policy.Policy{
+		Confirm: [][]string{{"/bin/echo", "dangerous"}},
+		Default: "ask",
+	})
+	svc.Conf.Timeout = 1 // 1 second timeout
+
+	type runOut struct {
+		res protocol.RunResult
+	}
+	done := make(chan runOut, 1)
+	go func() {
+		res := svc.Run(protocol.RunRequest{
+			Argv: []string{"/bin/echo", "dangerous"},
+			Cwd:  t.TempDir(),
+			Env:  map[string]string{},
+		}, 1000)
+		done <- runOut{res: res}
+	}()
+
+	// 1. Wait for step 1 petition
+	var step1ID string
+	for i := 0; i < 50; i++ {
+		items := svc.Store.List(time.Now().Unix())
+		if len(items) > 0 {
+			step1ID = items[0].ID
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if step1ID == "" {
+		t.Fatal("step 1 petition did not appear")
+	}
+
+	// Approve step 1
+	if !svc.Store.Consume(step1ID, "approve", "operator") {
+		t.Fatal("failed to consume step 1 approval")
+	}
+
+	// 2. Wait for step 2 confirmation petition
+	var step2ID string
+	for i := 0; i < 50; i++ {
+		items := svc.Store.List(time.Now().Unix())
+		for _, it := range items {
+			if it.ID != step1ID && it.ConfirmOf == step1ID {
+				step2ID = it.ID
+				break
+			}
+		}
+		if step2ID != "" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if step2ID == "" {
+		t.Fatal("step 2 confirmation petition did not appear")
+	}
+
+	// Do NOT approve step 2; wait for timeout
+	out := <-done
+	if out.res.Status != "denied" || out.res.Reason != "confirmation_timeout" {
+		t.Fatalf("RunResult = %+v, want denied confirmation_timeout", out.res)
+	}
+
+	// Both step 1 and step 2 must reflect timeout/denied
+	st1 := svc.Status(step1ID)
+	if st1.Status != "timeout" || st1.Exit != -1 {
+		t.Fatalf("step 1 status after timeout = %+v, want timeout exit -1", st1)
+	}
+	st2 := svc.Status(step2ID)
+	if st2.Status != "timeout" || st2.Exit != -1 {
+		t.Fatalf("step 2 status after timeout = %+v, want timeout exit -1", st2)
+	}
+}
+
+func TestConfirmLifecycleClientAborted(t *testing.T) {
+	svc := testService(t, policy.Policy{
+		Confirm: [][]string{{"/bin/echo", "dangerous"}},
+		Default: "ask",
+	})
+	svc.Conf.Timeout = 5
+
+	cancel := make(chan struct{})
+	type runOut struct {
+		res protocol.RunResult
+	}
+	done := make(chan runOut, 1)
+	go func() {
+		res := svc.RunWithCancel(protocol.RunRequest{
+			Argv: []string{"/bin/echo", "dangerous"},
+			Cwd:  t.TempDir(),
+			Env:  map[string]string{},
+		}, 1000, cancel)
+		done <- runOut{res: res}
+	}()
+
+	// 1. Wait for step 1 petition
+	var step1ID string
+	for i := 0; i < 50; i++ {
+		items := svc.Store.List(time.Now().Unix())
+		if len(items) > 0 {
+			step1ID = items[0].ID
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if step1ID == "" {
+		t.Fatal("step 1 petition did not appear")
+	}
+
+	// Approve step 1
+	if !svc.Store.Consume(step1ID, "approve", "operator") {
+		t.Fatal("failed to consume step 1 approval")
+	}
+
+	// 2. Wait for step 2 confirmation petition
+	var step2ID string
+	for i := 0; i < 50; i++ {
+		items := svc.Store.List(time.Now().Unix())
+		for _, it := range items {
+			if it.ID != step1ID && it.ConfirmOf == step1ID {
+				step2ID = it.ID
+				break
+			}
+		}
+		if step2ID != "" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if step2ID == "" {
+		t.Fatal("step 2 confirmation petition did not appear")
+	}
+
+	// Simulate client socket disconnect / Ctrl+C
+	close(cancel)
+
+	out := <-done
+	if out.res.Status != "denied" || out.res.Reason != "client_aborted" {
+		t.Fatalf("RunResult = %+v, want denied client_aborted", out.res)
+	}
+
+	// Pending list must now be empty (purged)
+	items := svc.Store.List(time.Now().Unix())
+	if len(items) != 0 {
+		t.Fatalf("Pending items after abort = %+v, want empty", items)
+	}
+
+	// Both step 1 and step 2 must reflect client_aborted
+	st1 := svc.Status(step1ID)
+	if st1.Status != "client_aborted" || st1.Exit != -1 {
+		t.Fatalf("step 1 status after abort = %+v, want client_aborted", st1)
+	}
+	st2 := svc.Status(step2ID)
+	if st2.Status != "client_aborted" || st2.Exit != -1 {
+		t.Fatalf("step 2 status after abort = %+v, want client_aborted", st2)
 	}
 }

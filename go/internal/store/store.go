@@ -85,6 +85,37 @@ func (s Store) Consume(rid, decision, by string) bool {
 	return err == nil
 }
 
+// Purge deletes all on-disk artifacts for a request ID.
+func (s Store) Purge(rid string) error {
+	_ = os.Remove(s.pendingPath(rid))
+	_ = os.Remove(filepath.Join(s.Pending, rid+".verdict"))
+	_ = os.Remove(filepath.Join(s.Pending, rid+".result"))
+	return nil
+}
+
+// FindConfirmation returns the request ID and record of a child confirmation petition, if any.
+func (s Store) FindConfirmation(parentRID string) (string, *protocol.PendingRecord) {
+	entries, err := os.ReadDir(s.Pending)
+	if err != nil {
+		return "", nil
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		rid := strings.TrimSuffix(name, ".json")
+		rec, err := s.Load(rid)
+		if err != nil {
+			continue
+		}
+		if rec.ConfirmOf == parentRID {
+			return rid, &rec
+		}
+	}
+	return "", nil
+}
+
 // List returns unexpired, undecided records, newest last.
 func (s Store) List(now int64) []protocol.PendingItem {
 	entries, err := os.ReadDir(s.Pending)
@@ -105,9 +136,18 @@ func (s Store) List(now int64) []protocol.PendingItem {
 		if err != nil || rec.Expires <= now {
 			continue
 		}
+		step := rec.Step
+		if step == "" {
+			step = "initial"
+		}
 		out = append(out, protocol.PendingItem{
-			ID: rid, Argv: rec.Argv, UID: rec.UID, Cwd: rec.Cwd,
+			ID:        rid,
+			Argv:      rec.Argv,
+			UID:       rec.UID,
+			Cwd:       rec.Cwd,
 			ExpiresIn: rec.Expires - now,
+			Step:      step,
+			ConfirmOf: rec.ConfirmOf,
 		})
 	}
 	return out
@@ -191,9 +231,32 @@ func (s Store) Recent(limit int) []protocol.RecentItem {
 			continue
 		}
 		exit, output := s.loadResult(f.rid)
+		step := rec.Step
+		if step == "" {
+			step = "initial"
+		}
+		dec := v.Decision
+		if exit == -1 {
+			if output == "confirmation_timeout" {
+				dec = "timeout"
+			} else if output == "client_aborted" {
+				dec = "client_aborted"
+			} else if childRID, _ := s.FindConfirmation(f.rid); childRID != "" {
+				if cv := s.Verdict(childRID); cv != nil {
+					dec = cv.Decision
+				}
+			}
+		}
 		out = append(out, protocol.RecentItem{
-			ID: f.rid, Argv: rec.Argv, Cwd: rec.Cwd,
-			Decision: v.Decision, By: v.By, Exit: exit, Output: output,
+			ID:        f.rid,
+			Argv:      rec.Argv,
+			Cwd:       rec.Cwd,
+			Decision:  dec,
+			By:        v.By,
+			Exit:      exit,
+			Output:    output,
+			Step:      step,
+			ConfirmOf: rec.ConfirmOf,
 		})
 	}
 	if out == nil {
@@ -208,6 +271,10 @@ func (s Store) Status(rid string, now int64) protocol.StatusResponse {
 	if err != nil {
 		return protocol.StatusResponse{ID: rid, Status: "not_found", Exit: -1}
 	}
+	step := rec.Step
+	if step == "" {
+		step = "initial"
+	}
 	v := s.Verdict(rid)
 	if v == nil {
 		if rec.Expires > now {
@@ -219,43 +286,73 @@ func (s Store) Status(rid string, now int64) protocol.StatusResponse {
 				UID:       rec.UID,
 				ExpiresIn: rec.Expires - now,
 				Exit:      -1,
+				Step:      step,
+				ConfirmOf: rec.ConfirmOf,
 			}
 		}
 		return protocol.StatusResponse{
-			ID:     rid,
-			Status: "timeout",
-			Argv:   rec.Argv,
-			Cwd:    rec.Cwd,
-			UID:    rec.UID,
-			Exit:   -1,
+			ID:        rid,
+			Status:    "timeout",
+			Argv:      rec.Argv,
+			Cwd:       rec.Cwd,
+			UID:       rec.UID,
+			Exit:      -1,
+			Step:      step,
+			ConfirmOf: rec.ConfirmOf,
 		}
 	}
 
 	resultPath := filepath.Join(s.Pending, rid+".result")
 	data, err := os.ReadFile(resultPath)
 	if err != nil {
-		// Verdict recorded, but result file not yet written (command running)
+		// Verdict recorded, but result file not yet written
 		if v.Decision == "approve" {
+			// If this was an initial request, check if a child confirmation is awaiting verdict
+			if step == "initial" {
+				if childRID, childRec := s.FindConfirmation(rid); childRec != nil && s.Verdict(childRID) == nil {
+					expiresIn := childRec.Expires - now
+					if expiresIn < 0 {
+						expiresIn = 0
+					}
+					return protocol.StatusResponse{
+						ID:        rid,
+						Status:    "confirming",
+						Decision:  v.Decision,
+						By:        v.By,
+						Argv:      rec.Argv,
+						Cwd:       rec.Cwd,
+						UID:       rec.UID,
+						ExpiresIn: expiresIn,
+						Exit:      -1,
+						Step:      step,
+						ConfirmOf: rec.ConfirmOf,
+					}
+				}
+			}
 			return protocol.StatusResponse{
-				ID:       rid,
-				Status:   "running",
-				Decision: v.Decision,
-				By:       v.By,
-				Argv:     rec.Argv,
-				Cwd:      rec.Cwd,
-				UID:      rec.UID,
-				Exit:     -1,
+				ID:        rid,
+				Status:    "running",
+				Decision:  v.Decision,
+				By:        v.By,
+				Argv:      rec.Argv,
+				Cwd:       rec.Cwd,
+				UID:       rec.UID,
+				Exit:      -1,
+				Step:      step,
+				ConfirmOf: rec.ConfirmOf,
 			}
 		}
 		return protocol.StatusResponse{
-			ID:       rid,
-			Status:   v.Decision,
-			Decision: v.Decision,
-			By:       v.By,
-			Argv:     rec.Argv,
-			Cwd:      rec.Cwd,
-			UID:      rec.UID,
-			Exit:     -1,
+			ID:        rid,
+			Status:    v.Decision,
+			Decision:  v.Decision,
+			By:        v.By,
+			Argv:      rec.Argv,
+			Cwd:       rec.Cwd,
+			UID:       rec.UID,
+			Exit:      -1,
+			Step:      step,
+			ConfirmOf: rec.ConfirmOf,
 		}
 	}
 
@@ -264,21 +361,45 @@ func (s Store) Status(rid string, now int64) protocol.StatusResponse {
 		r.Exit = -1
 	}
 	status := "completed"
+	decision := v.Decision
 	if v.Decision == "deny" {
 		status = "denied"
-	} else if v.Decision == "timeout" {
+	} else if v.Decision == "timeout" || v.Decision == "confirmation_timeout" || r.Output == "confirmation_timeout" {
 		status = "timeout"
+		if r.Output == "confirmation_timeout" {
+			decision = "confirmation_timeout"
+		}
+	} else if v.Decision == "client_aborted" || r.Output == "client_aborted" {
+		status = "client_aborted"
+		if r.Output == "client_aborted" {
+			decision = "client_aborted"
+		}
+	} else if r.Exit == -1 {
+		if childRID, _ := s.FindConfirmation(rid); childRID != "" {
+			if cv := s.Verdict(childRID); cv != nil {
+				decision = cv.Decision
+				if cv.Decision == "deny" {
+					status = "denied"
+				} else if cv.Decision == "timeout" || cv.Decision == "confirmation_timeout" {
+					status = "timeout"
+				} else if cv.Decision == "client_aborted" {
+					status = "client_aborted"
+				}
+			}
+		}
 	}
 	return protocol.StatusResponse{
-		ID:       rid,
-		Status:   status,
-		Decision: v.Decision,
-		By:       v.By,
-		Argv:     rec.Argv,
-		Cwd:      rec.Cwd,
-		UID:      rec.UID,
-		Exit:     r.Exit,
-		Output:   r.Output,
+		ID:        rid,
+		Status:    status,
+		Decision:  decision,
+		By:        v.By,
+		Argv:      rec.Argv,
+		Cwd:       rec.Cwd,
+		UID:       rec.UID,
+		Exit:      r.Exit,
+		Output:    r.Output,
+		Step:      step,
+		ConfirmOf: rec.ConfirmOf,
 	}
 }
 

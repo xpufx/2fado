@@ -143,43 +143,60 @@ func flatten(env map[string]string) []string {
 	return out
 }
 
-// Run handles one RunRequest end to end. Pure domain logic; transport
-// lives in internal/daemon, a future MCP adapter calls this directly.
+// // Run handles one RunRequest end to end with optional cancellation.
 func (s Service) Run(req protocol.RunRequest, uid uint32) protocol.RunResult {
+	return s.RunWithCancel(req, uid, nil)
+}
+
+// RunWithCancel handles one RunRequest end to end with early cancellation support.
+func (s Service) RunWithCancel(req protocol.RunRequest, uid uint32, cancel <-chan struct{}) protocol.RunResult {
 	clean, dropped := s.ScrubEnv(req.Env)
 	tier := s.Policy.Tier(req.Argv)
 	s.Store.Append(protocol.AuditEvent{Ev: "request", UID: uid,
-		Argv: req.Argv, Cwd: req.Cwd, Tier: tier, EnvDropped: dropped})
+		Argv: req.Argv, Cwd: req.Cwd, Tier: tier, EnvDropped: dropped, Step: "initial"})
 	switch tier {
 	case "allow":
 		code, out, asUID := s.Execute(req.Argv, req.Cwd, clean)
 		s.Store.Append(protocol.AuditEvent{Ev: "allow", UID: uid,
-			Argv: req.Argv, AsUID: asUID, Exit: code})
+			Argv: req.Argv, AsUID: asUID, Exit: code, Step: "initial"})
 		return protocol.RunResult{Status: "allowed", Exit: code, Output: out}
 	case "deny":
 		return protocol.RunResult{Status: "denied", Reason: "policy"}
 	}
 	rid := newRID()
 	expires := time.Now().Add(time.Duration(s.Conf.Timeout) * time.Second)
-	_ = s.Store.Save(protocol.PendingRecord{Argv: req.Argv, UID: uid,
-		Cwd: req.Cwd, Expires: expires.Unix()}, rid)
+	_ = s.Store.Save(protocol.PendingRecord{
+		Argv:    req.Argv,
+		UID:     uid,
+		Cwd:     req.Cwd,
+		Expires: expires.Unix(),
+		Step:    "initial",
+	}, rid)
 	s.page(rid, req, uid)
-	v := s.await(rid, expires)
+	v := s.await(rid, expires, cancel)
 	decision := "timeout"
 	by := ""
 	if v != nil {
 		decision = v.Decision
 		by = v.By
 	}
+	if decision == "client_aborted" {
+		s.Store.Consume(rid, decision, by)
+		s.closeCard(rid, req, uid, decision)
+		s.Store.SaveResult(rid, -1, "client_aborted")
+		s.Store.Append(protocol.AuditEvent{Ev: "client_aborted", Argv: req.Argv,
+			RID: rid, Step: "initial", By: by})
+		return protocol.RunResult{Status: "denied", Reason: "client_aborted"}
+	}
 	s.Store.Append(protocol.AuditEvent{Ev: "verdict", Argv: req.Argv,
-		RID: rid, Decision: decision, By: by})
+		RID: rid, Step: "initial", Decision: decision, By: by})
 	if decision != "approve" {
 		s.closeCard(rid, req, uid, decision)
 		s.Store.SaveResult(rid, -1, "")
 		return protocol.RunResult{Status: "denied", Reason: decision}
 	}
 	if s.needsConfirm(req.Argv) {
-		return s.confirm(rid, req, uid, clean, by)
+		return s.confirm(rid, req, uid, clean, by, cancel)
 	}
 	s.closeCard(rid, req, uid, decision)
 	return s.runApproved(rid, req, uid, clean)
@@ -191,42 +208,95 @@ func (s Service) needsConfirm(argv []string) bool {
 
 // confirm chains a second ask onto an approved request: a fresh record
 // with fresh buttons on the same card, reusing every seam (one-wins
-// consume, timeout, audit). A replay of step 1 alone buys nothing.
-func (s Service) confirm(rid1 string, req protocol.RunRequest, uid uint32, clean map[string]string, by string) protocol.RunResult {
+// consume, timeout, audit).
+func (s Service) confirm(rid1 string, req protocol.RunRequest, uid uint32, clean map[string]string, by string, cancel <-chan struct{}) protocol.RunResult {
 	rec1, err := s.Store.Load(rid1)
 	if err != nil {
 		return protocol.RunResult{Status: "denied", Reason: "lost-record"}
 	}
 	rid := newRID()
 	expires := time.Now().Add(time.Duration(s.Conf.Timeout) * time.Second)
-	_ = s.Store.Save(protocol.PendingRecord{Argv: req.Argv, UID: uid,
-		Cwd: req.Cwd, Expires: expires.Unix(),
-		ChatID: rec1.ChatID, MsgID: rec1.MsgID}, rid)
-	s.Store.Append(protocol.AuditEvent{Ev: "confirm", Argv: req.Argv,
-		RID: rid + "<" + rid1, By: by})
+	_ = s.Store.Save(protocol.PendingRecord{
+		Argv:      req.Argv,
+		UID:       uid,
+		Cwd:       req.Cwd,
+		Expires:   expires.Unix(),
+		Step:      "confirm",
+		ConfirmOf: rid1,
+		ChatID:    rec1.ChatID,
+		MsgID:     rec1.MsgID,
+	}, rid)
+	s.Store.Append(protocol.AuditEvent{
+		Ev:        "confirm",
+		Argv:      req.Argv,
+		RID:       rid,
+		Step:      "confirm",
+		ConfirmOf: rid1,
+		By:        by,
+	})
 	left := int64(s.Conf.Timeout)
 	if !s.Conf.Placeholder() && rec1.ChatID != "" {
 		s.TG.Edit(rec1.ChatID, rec1.MsgID, telegram.Card(s.Host, req.Argv,
 			uid, req.Cwd, rid, left, "confirm", s.Conf.DryRun),
 			telegram.Buttons(rid))
 	} else {
-		fmt.Printf("[pager:stdout] CONFIRM %s (approve: 2fado approve %s)\n", rid, rid)
+		fmt.Printf("[pager:stdout] CONFIRM %s (confirm of %s) (approve: 2fado approve %s)\n", rid, rid1, rid)
 	}
-	v := s.await(rid, expires)
-	decision := "timeout"
+	v := s.await(rid, expires, cancel)
+	decision := "confirmation_timeout"
 	cby := ""
 	if v != nil {
 		decision = v.Decision
 		cby = v.By
 	}
-	s.Store.Append(protocol.AuditEvent{Ev: "verdict", Argv: req.Argv,
-		RID: rid, Decision: decision, By: cby})
+	if decision == "client_aborted" {
+		s.Store.Consume(rid, decision, cby)
+		s.closeCard(rid, req, uid, decision)
+		s.Store.SaveResult(rid, -1, "client_aborted")
+		s.Store.SaveResult(rid1, -1, "client_aborted")
+		s.Store.Append(protocol.AuditEvent{
+			Ev:        "client_aborted",
+			Argv:      req.Argv,
+			RID:       rid,
+			Step:      "confirm",
+			ConfirmOf: rid1,
+			By:        cby,
+		})
+		return protocol.RunResult{Status: "denied", Reason: "client_aborted"}
+	}
+	if decision == "confirmation_timeout" || decision == "timeout" {
+		s.Store.Consume(rid, "timeout", "system")
+		s.closeCard(rid, req, uid, "timeout")
+		s.Store.SaveResult(rid, -1, "confirmation_timeout")
+		s.Store.SaveResult(rid1, -1, "confirmation_timeout")
+		s.Store.Append(protocol.AuditEvent{
+			Ev:        "confirmation_timeout",
+			Argv:      req.Argv,
+			RID:       rid,
+			Step:      "confirm",
+			ConfirmOf: rid1,
+			By:        "system",
+		})
+		return protocol.RunResult{Status: "denied", Reason: "confirmation_timeout"}
+	}
+	s.Store.Append(protocol.AuditEvent{
+		Ev:        "verdict",
+		Argv:      req.Argv,
+		RID:       rid,
+		Step:      "confirm",
+		ConfirmOf: rid1,
+		Decision:  decision,
+		By:        cby,
+	})
 	s.closeCard(rid, req, uid, decision)
 	if decision != "approve" {
 		s.Store.SaveResult(rid, -1, "")
+		s.Store.SaveResult(rid1, -1, "")
 		return protocol.RunResult{Status: "denied", Reason: decision}
 	}
-	return s.runApproved(rid, req, uid, clean)
+	res := s.runApproved(rid, req, uid, clean)
+	s.Store.SaveResult(rid1, res.Exit, res.Output)
+	return res
 }
 
 func (s Service) runApproved(rid string, req protocol.RunRequest, uid uint32, clean map[string]string) protocol.RunResult {
@@ -294,7 +364,9 @@ func cleanBy(by string) string {
 
 // await polls the store only: TelegramPump is the single consumer of the
 // poll channel, so verdicts cannot be split between two readers.
-func (s Service) await(rid string, expires time.Time) *telegram.Verdict {
+func (s Service) await(rid string, expires time.Time, cancel <-chan struct{}) *telegram.Verdict {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
 	for {
 		if v := s.Store.Verdict(rid); v != nil {
 			return &telegram.Verdict{RID: rid, Decision: v.Decision, By: v.By}
@@ -302,7 +374,11 @@ func (s Service) await(rid string, expires time.Time) *telegram.Verdict {
 		if time.Now().After(expires) {
 			return nil
 		}
-		time.Sleep(500 * time.Millisecond)
+		select {
+		case <-cancel:
+			return &telegram.Verdict{RID: rid, Decision: "client_aborted", By: "client"}
+		case <-ticker.C:
+		}
 	}
 }
 
