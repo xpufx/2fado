@@ -25,31 +25,37 @@ fallback until the Paseo path proves itself.
   and verdicts must never ride in timeline data.
 - Workspace panel deferred (status dashboard is a nice-to-have, not v1).
 
-## RPC contracts (Zod, both sides validated)
+## RPC contracts (helper `defineContract`, both sides validated)
 
 ```ts
-// shared/approval.ts
-pendingList = defineRpc({
+// shared/approval.ts — defineContract from paseo-plugin-helper/shared
+pendingList = defineContract({
   name: "approval.list",
-  input: z.object({}),
+  input: z.object({ socketPath: z.string().min(1).optional() }),
   output: z.object({ items: z.array(z.object({
     id: z.string(), argv: z.array(z.string()), host: z.string(),
     caller: z.string(), cwd: z.string(), expiresIn: z.number(),
   })) }),
 });
-verdict = defineRpc({
+verdict = defineContract({
   name: "approval.verdict",
   input: z.object({ id: z.string(),
-    decision: z.enum(["approve", "deny"]) }),
+    decision: z.enum(["approve", "deny"]),
+    socketPath: z.string().min(1).optional() }),
   output: z.object({ recorded: z.boolean() }),
 });
+// settings: defineSettingsContract (socketPath, telegramFallback),
+// stored daemon-side via PluginStorage, auto-screen via
+// registerHelperSettingsScreen under Settings → Plugins.
 ```
 
 ## Server behavior (daemon subprocess, trusted)
 
-- Owns the socket to `2fadod` (path: `FADO_SOCKET` env, then
-  `/run/2fado.sock`, then `/tmp/2fado-live.sock`). Polls `list` and fans
-  out: toast per new id.
+- Owns the socket to `2fadod` (per-call `socketPath` from the app,
+  then `FADO_SOCKET` env, then `/run/2fado.sock`, then
+  `/tmp/2fado-live.sock`). Polls `list` and fans out: toast per new id.
+  Socket calls are wrapped in `guardRpcHandler` (5s timeout, max 4
+  inflight, fail-fast) with structured `createPluginLogger` logging.
 - Verdict handler submits `{id, decision, by: "paseo"}` over the `2fadod`
   socket and returns `{recorded}`. No per-call allowlist: v0.8 exposes no
   clicker identity on either runtime, so a names list would be theater —

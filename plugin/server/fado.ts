@@ -1,7 +1,10 @@
 import net from "node:net";
 import os from "node:os";
-import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
+import type { RpcInput, RpcOutput } from "paseo-plugin-helper/shared";
+import { createPluginLogger, guardRpcHandler } from "paseo-plugin-helper/server";
 import { pendingList, verdict } from "../shared/approval";
+
+const log = createPluginLogger("fado-approval", { banner: false });
 
 const DEFAULT_SOCKET = "/run/2fado.sock";
 const LIVE_SOCKET = "/tmp/2fado-live.sock";
@@ -87,10 +90,10 @@ async function callDaemon(
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
-export async function listPending(
-  input: RpcInput<typeof pendingList>,
+async function listPendingInner(
+  input?: RpcInput<typeof pendingList>,
 ): Promise<RpcOutput<typeof pendingList>> {
-  const raw = (await callDaemon({ list: {} }, input.socketPath)) as DaemonPendingList;
+  const raw = (await callDaemon({ list: {} }, input?.socketPath)) as DaemonPendingList;
   const host = os.hostname();
   const items = Array.isArray(raw.items) ? raw.items : [];
   return {
@@ -105,9 +108,10 @@ export async function listPending(
   };
 }
 
-export async function submitVerdict(
-  input: RpcInput<typeof verdict>,
+async function submitVerdictInner(
+  input?: RpcInput<typeof verdict>,
 ): Promise<RpcOutput<typeof verdict>> {
+  if (input === undefined) return { recorded: false };
   try {
     const raw = (await callDaemon(
       {
@@ -116,7 +120,22 @@ export async function submitVerdict(
       input.socketPath,
     )) as { recorded: boolean };
     return { recorded: raw.recorded === true };
-  } catch {
+  } catch (err) {
+    log.warn("verdict submit failed", { id: input.id, error: err });
     return { recorded: false };
   }
 }
+
+export const listPending = guardRpcHandler(listPendingInner, {
+  timeoutMs: 5000,
+  maxInflight: 4,
+  onTimeout: (info) => log.warn("list timed out", info),
+  onSaturated: (info) => log.warn("list saturated, shedding load", info),
+});
+
+export const submitVerdict = guardRpcHandler(submitVerdictInner, {
+  timeoutMs: 5000,
+  maxInflight: 4,
+  onTimeout: (info) => log.warn("verdict timed out", info),
+  onSaturated: (info) => log.warn("verdict saturated, shedding load", info),
+});

@@ -1,13 +1,25 @@
 import type { PluginClientContext, PluginSurfaceProps } from "@getpaseo/plugin/client";
+import { useRpc } from "@getpaseo/plugin/client";
+import { Icon, Modal, ScrollView, useToast } from "@getpaseo/plugin/client/react-native";
+import {
+  SettingsCard,
+  SettingsInput,
+  SettingsSection,
+  SettingsSelect,
+  SettingsSwitch,
+} from "@getpaseo/plugin/client/ui";
+import { initClientHelpers, registerHelperSettingsScreen } from "paseo-plugin-helper/client";
+import { approvalSettings } from "./shared/approval";
 import {
   ApprovalHeaderIcon,
   ApprovalSurface,
   trackHeaderButton,
   untrackHeaderButton,
 } from "./client/approvals";
-import { ApprovalSettings } from "./client/settings";
 
 export default function contribute(client: PluginClientContext) {
+  initClientHelpers({ Icon, Modal, useRpc, useToast, ScrollView });
+
   const Surface = (props: PluginSurfaceProps) => (
     <ApprovalSurface {...props} onOpenSettings={() => client.openSettings("fado-approval")} />
   );
@@ -37,6 +49,18 @@ export default function contribute(client: PluginClientContext) {
     },
   });
 
+  const removeSettingsScreen = registerHelperSettingsScreen(client, approvalSettings, {
+    id: "fado-approval",
+    title: "2fado approval",
+    icon: "ShieldCheck",
+    ui: { SettingsCard, SettingsSection, SettingsSwitch, SettingsSelect, SettingsInput },
+    labels: { socketPath: "2fadod socket", telegramFallback: "Telegram fallback" },
+    descriptions: {
+      socketPath: "Daemon-local path. The app sends it with every call; the server tries it first.",
+      telegramFallback: "Keep paging over Telegram until the Paseo path proves itself.",
+    },
+  });
+
   const buttons = new Map<string, () => void>();
   const unsubscribe = client.paseo.agents.subscribe((update) => {
     if (update.kind !== "upsert" || !update.agent.workspaceId) return;
@@ -58,17 +82,10 @@ export default function contribute(client: PluginClientContext) {
     trackHeaderButton(workspaceId, registration);
   });
 
-  const removeSettings = client.addSettingsScreen({
-    id: "fado-approval",
-    title: "2fado approval",
-    icon: "ShieldCheck",
-    Component: ApprovalSettings,
-  });
-
   return () => {
     unsubscribe();
     for (const remove of buttons.values()) remove();
     buttons.clear();
-    removeSettings();
+    removeSettingsScreen();
   };
 }

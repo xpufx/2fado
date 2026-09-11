@@ -1,7 +1,7 @@
-import { defineRpc, defineSettings } from "@getpaseo/plugin";
 import { z } from "zod";
+import { defineContract, defineSettingsContract } from "paseo-plugin-helper/shared";
 
-export const pendingList = defineRpc({
+export const pendingList = defineContract({
   name: "approval.list",
   input: z.object({ socketPath: z.string().min(1).optional() }),
   output: z.object({
@@ -16,9 +16,10 @@ export const pendingList = defineRpc({
       }),
     ),
   }),
+  description: "List unexpired, undecided 2fado requests",
 });
 
-export const verdict = defineRpc({
+export const verdict = defineContract({
   name: "approval.verdict",
   input: z.object({
     id: z.string(),
@@ -26,19 +27,23 @@ export const verdict = defineRpc({
     socketPath: z.string().min(1).optional(),
   }),
   output: z.object({ recorded: z.boolean() }),
+  description: "Record an approve/deny verdict for a 2fado request",
 });
 
-export const approvalSettings = defineSettings({
-  id: "fado-approval",
-  scope: "host",
-  version: 2,
-  schema: z.object({
-    socketPath: z.string().trim().min(1, "Enter the 2fadod socket path").default("/run/2fado.sock"),
-    telegramFallback: z.boolean().default(true),
-  }),
-  migrate: (values) => {
-    if (typeof values !== "object" || values === null) return values;
-    const v = values as Record<string, unknown>;
-    return { socketPath: v["socketPath"], telegramFallback: v["telegramFallback"] };
-  },
+const settingsSchema = z.object({
+  socketPath: z
+    .string()
+    .trim()
+    .min(1, "Enter the 2fadod socket path")
+    .default("/run/2fado.sock")
+    .describe("2fadod socket"),
+  telegramFallback: z.boolean().default(true).describe("Telegram fallback"),
+});
+
+export type ApprovalSettingsValues = z.output<typeof settingsSchema>;
+
+export const approvalSettings = defineSettingsContract<ApprovalSettingsValues>({
+  name: "fado-approval.settings",
+  schema: settingsSchema,
+  description: "2fado approval settings",
 });
