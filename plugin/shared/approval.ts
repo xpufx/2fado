@@ -3,7 +3,7 @@ import { z } from "zod";
 
 export const pendingList = defineRpc({
   name: "approval.list",
-  input: z.object({}),
+  input: z.object({ socketPath: z.string().min(1).optional() }),
   output: z.object({
     items: z.array(
       z.object({
@@ -23,6 +23,7 @@ export const verdict = defineRpc({
   input: z.object({
     id: z.string(),
     decision: z.enum(["approve", "deny"]),
+    socketPath: z.string().min(1).optional(),
   }),
   output: z.object({ recorded: z.boolean() }),
 });
@@ -30,14 +31,14 @@ export const verdict = defineRpc({
 export const approvalSettings = defineSettings({
   id: "fado-approval",
   scope: "host",
-  version: 1,
+  version: 2,
   schema: z.object({
     socketPath: z.string().trim().min(1, "Enter the 2fadod socket path").default("/run/2fado.sock"),
-    approvers: z
-      .string()
-      .trim()
-      .default("")
-      .describe("Comma-separated Paseo user ids. Empty disables all approvals."),
     telegramFallback: z.boolean().default(true),
   }),
+  migrate: (values) => {
+    if (typeof values !== "object" || values === null) return values;
+    const v = values as Record<string, unknown>;
+    return { socketPath: v["socketPath"], telegramFallback: v["telegramFallback"] };
+  },
 });

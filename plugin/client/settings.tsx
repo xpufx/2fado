@@ -14,7 +14,6 @@ import { approvalSettings } from "../shared/approval";
 export function ApprovalSettings({ theme }: PluginSurfaceProps) {
   const settings = useSettings(approvalSettings);
   const [socketPath, setSocketPath] = useState<string | null>(null);
-  const [approvers, setApprovers] = useState<string | null>(null);
   const style = useMemo(() => ({ color: theme.colors.foreground }), [theme]);
   const hint = useMemo(() => ({ color: theme.colors.foregroundMuted, fontSize: 12 }), [theme]);
 
@@ -29,26 +28,16 @@ export function ApprovalSettings({ theme }: PluginSurfaceProps) {
 
   const values = settings.values;
   const draftSocket = socketPath ?? values.socketPath;
-  const draftApprovers = approvers ?? values.approvers;
-  const dirty = draftSocket !== values.socketPath || draftApprovers !== values.approvers;
+  const dirty = draftSocket !== values.socketPath;
 
   return (
     <SettingsSection title="2fado approval">
       <SettingsCard>
         <SettingsInput
           label="2fadod socket"
-          hint="Daemon-local path. The server also honors FADO_SOCKET (default /run/2fado.sock)."
+          hint="Daemon-local path. The app sends it with every list and verdict call; the server tries it first, then FADO_SOCKET and the built-in defaults."
           initialValue={draftSocket}
           onChangeText={setSocketPath}
-          disabled={settings.saving}
-          error={settings.saveError}
-        />
-        <SettingsInput
-          label="Approvers"
-          hint="Comma-separated Paseo user ids. Empty disables all approvals (fail closed)."
-          initialValue={draftApprovers}
-          onChangeText={setApprovers}
-          placeholder="octavia, bruno"
           disabled={settings.saving}
           error={settings.saveError}
         />
@@ -58,30 +47,27 @@ export function ApprovalSettings({ theme }: PluginSurfaceProps) {
           value={values.telegramFallback}
           disabled={settings.saving}
           onValueChange={(telegramFallback) =>
-            void settings.save({ ...values, socketPath: draftSocket, approvers: draftApprovers, telegramFallback }, settings.revision)
+            void settings.save(
+              { socketPath: draftSocket, telegramFallback },
+              settings.revision,
+            )
           }
         />
         <SettingsAction
-          label="Socket and approvers"
+          label="Socket path"
           actionLabel="Save"
           disabled={settings.saving || !dirty}
           onPress={() =>
             void settings
-              .save(
-                { ...values, socketPath: draftSocket, approvers: draftApprovers },
-                settings.revision,
-              )
+              .save({ ...values, socketPath: draftSocket }, settings.revision)
               .then((ok) => {
-                if (ok) {
-                  setSocketPath(null);
-                  setApprovers(null);
-                }
+                if (ok) setSocketPath(null);
               })
           }
         />
       </SettingsCard>
       <Text style={hint}>
-        Approval buttons stay disabled until at least one approver is configured.
+        Anyone holding this app can approve. Real gating belongs in 2fadod, not here.
       </Text>
     </SettingsSection>
   );

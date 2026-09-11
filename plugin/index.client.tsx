@@ -1,30 +1,61 @@
-import type { PluginClientContext } from "@getpaseo/plugin/client";
-import { ApprovalPopover, ApprovalPillIcon, trackPill, untrackPill } from "./client/approvals";
+import type { PluginClientContext, PluginSurfaceProps } from "@getpaseo/plugin/client";
+import {
+  ApprovalHeaderIcon,
+  ApprovalSurface,
+  trackHeaderButton,
+  untrackHeaderButton,
+} from "./client/approvals";
 import { ApprovalSettings } from "./client/settings";
 
 export default function contribute(client: PluginClientContext) {
-  const pills = new Map<string, () => void>();
+  const Surface = (props: PluginSurfaceProps) => (
+    <ApprovalSurface {...props} onOpenSettings={() => client.openSettings("fado-approval")} />
+  );
+  client.addSurface("approvals", Surface);
+  client.addSidebarItem({
+    id: "approvals",
+    title: "2fado approvals",
+    icon: "ShieldCheck",
+    surface: "approvals",
+  });
+  client.addCommandCenterItem({
+    id: "open-approvals",
+    title: "Open 2fado approvals",
+    icon: "ShieldCheck",
+    context: "global",
+    onSelect({ openSurface }) {
+      openSurface("approvals");
+    },
+  });
+  client.addCommandCenterItem({
+    id: "configure-approvals",
+    title: "Configure 2fado approval",
+    icon: "Settings",
+    context: "global",
+    onSelect({ openSettings }) {
+      openSettings("fado-approval");
+    },
+  });
 
+  const buttons = new Map<string, () => void>();
   const unsubscribe = client.paseo.agents.subscribe((update) => {
     if (update.kind !== "upsert" || !update.agent.workspaceId) return;
-    const { id: agentId, workspaceId } = update.agent;
-    if (pills.has(agentId)) return;
-    const registration = client.addComposerPill({
+    const { workspaceId } = update.agent;
+    if (buttons.has(workspaceId)) return;
+    const registration = client.addHeaderButton({
       id: "fado-approval",
       workspaceId,
-      agentId,
       button: {
         title: "2fado approvals",
-        label: "2fado",
-        icon: ApprovalPillIcon,
-        behavior: { kind: "popover", Content: ApprovalPopover },
+        icon: ApprovalHeaderIcon,
+        behavior: { kind: "action", onPress: () => client.openSurface("approvals") },
       },
     });
-    pills.set(agentId, () => {
-      untrackPill(agentId);
+    buttons.set(workspaceId, () => {
+      untrackHeaderButton(workspaceId);
       registration.remove();
     });
-    trackPill(agentId, registration);
+    trackHeaderButton(workspaceId, registration);
   });
 
   const removeSettings = client.addSettingsScreen({
@@ -36,8 +67,8 @@ export default function contribute(client: PluginClientContext) {
 
   return () => {
     unsubscribe();
-    for (const remove of pills.values()) remove();
-    pills.clear();
+    for (const remove of buttons.values()) remove();
+    buttons.clear();
     removeSettings();
   };
 }

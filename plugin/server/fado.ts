@@ -4,10 +4,21 @@ import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import { pendingList, verdict } from "../shared/approval";
 
 const DEFAULT_SOCKET = "/run/2fado.sock";
+const LIVE_SOCKET = "/tmp/2fado-live.sock";
 
-function socketPath(): string {
-  const env = process.env.FADO_SOCKET?.trim();
-  return env !== undefined && env.length > 0 ? env : DEFAULT_SOCKET;
+function socketCandidates(configured?: string): string[] {
+  const candidates: string[] = [];
+  const push = (sock: string | undefined) => {
+    const trimmed = sock?.trim();
+    if (trimmed !== undefined && trimmed.length > 0 && !candidates.includes(trimmed)) {
+      candidates.push(trimmed);
+    }
+  };
+  push(configured);
+  push(process.env.FADO_SOCKET);
+  push(DEFAULT_SOCKET);
+  push(LIVE_SOCKET);
+  return candidates;
 }
 
 interface DaemonPendingItem {
@@ -22,9 +33,8 @@ interface DaemonPendingList {
   items: DaemonPendingItem[];
 }
 
-function callDaemon(message: unknown, timeoutMs = 5000): Promise<unknown> {
+function callDaemonOn(sock: string, message: unknown, timeoutMs: number): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    const sock = socketPath();
     let buffer = "";
     let settled = false;
     const socket = net.createConnection(sock);
@@ -57,11 +67,30 @@ function callDaemon(message: unknown, timeoutMs = 5000): Promise<unknown> {
       }
     });
     socket.on("error", (err) => fail(err instanceof Error ? err : new Error(String(err))));
+    socket.on("close", () => fail(new Error(`2fadod closed connection (${sock})`)));
   });
 }
 
-export async function listPending(): Promise<RpcOutput<typeof pendingList>> {
-  const raw = (await callDaemon({ list: {} })) as DaemonPendingList;
+async function callDaemon(
+  message: unknown,
+  configured?: string,
+  timeoutMs = 2000,
+): Promise<unknown> {
+  let lastError: unknown = new Error("no 2fadod socket candidates");
+  for (const sock of socketCandidates(configured)) {
+    try {
+      return await callDaemonOn(sock, message, timeoutMs);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+export async function listPending(
+  input: RpcInput<typeof pendingList>,
+): Promise<RpcOutput<typeof pendingList>> {
+  const raw = (await callDaemon({ list: {} }, input.socketPath)) as DaemonPendingList;
   const host = os.hostname();
   const items = Array.isArray(raw.items) ? raw.items : [];
   return {
@@ -80,9 +109,12 @@ export async function submitVerdict(
   input: RpcInput<typeof verdict>,
 ): Promise<RpcOutput<typeof verdict>> {
   try {
-    const raw = (await callDaemon({
-      verdict: { id: input.id, decision: input.decision, by: "paseo" },
-    })) as { recorded: boolean };
+    const raw = (await callDaemon(
+      {
+        verdict: { id: input.id, decision: input.decision, by: "paseo" },
+      },
+      input.socketPath,
+    )) as { recorded: boolean };
     return { recorded: raw.recorded === true };
   } catch {
     return { recorded: false };

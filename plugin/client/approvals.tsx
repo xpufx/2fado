@@ -1,8 +1,8 @@
 import { useRpc, useSettings } from "@getpaseo/plugin/client";
 import type {
-  PluginButtonContentProps,
   PluginButtonIconProps,
   PluginButtonRegistration,
+  PluginSurfaceProps,
 } from "@getpaseo/plugin/client";
 import { Icon, ScrollView, useToast } from "@getpaseo/plugin/client/react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -10,35 +10,43 @@ import { useEffect, useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
 import { approvalSettings, pendingList, verdict } from "../shared/approval";
 
-const LIST_KEY = ["2fado-approval", "pending"];
+const LIST_KEY = ["fado-approval", "pending"];
 const POLL_MS = 3000;
 
 const seenIds = new Set<string>();
-const pillRegistry = new Map<string, PluginButtonRegistration>();
+const headerRegistry = new Map<string, PluginButtonRegistration>();
 
-export function trackPill(agentId: string, registration: PluginButtonRegistration) {
-  pillRegistry.get(agentId)?.remove();
-  pillRegistry.set(agentId, registration);
+export function trackHeaderButton(workspaceId: string, registration: PluginButtonRegistration) {
+  headerRegistry.get(workspaceId)?.remove();
+  headerRegistry.set(workspaceId, registration);
 }
 
-export function untrackPill(agentId: string) {
-  pillRegistry.get(agentId)?.remove();
-  pillRegistry.delete(agentId);
+export function untrackHeaderButton(workspaceId: string) {
+  headerRegistry.get(workspaceId)?.remove();
+  headerRegistry.delete(workspaceId);
+}
+
+export function useSocketPath(): string | undefined {
+  const settings = useSettings(approvalSettings);
+  if (settings.status !== "ready") return undefined;
+  const trimmed = settings.values.socketPath.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 export function usePendingList() {
   const list = useRpc(pendingList);
+  const socketPath = useSocketPath();
   return useQuery({
-    queryKey: LIST_KEY,
-    queryFn: () => list({}),
+    queryKey: [...LIST_KEY, socketPath ?? ""],
+    queryFn: () => list({ socketPath }),
     refetchInterval: POLL_MS,
     retry: false,
   });
 }
 
-export function ApprovalPillIcon(props: PluginButtonIconProps) {
+export function ApprovalHeaderIcon(props: PluginButtonIconProps) {
   const { theme } = props;
-  const agentId = props.context === "agent" ? props.agentId : "";
+  const workspaceId = props.workspaceId;
   const size = props.size;
   const color = props.color;
   const toast = useToast();
@@ -56,8 +64,10 @@ export function ApprovalPillIcon(props: PluginButtonIconProps) {
   }, [data, toast]);
 
   useEffect(() => {
-    pillRegistry.get(agentId)?.update({ label: count > 0 ? `${count} pending` : "2fado" });
-  }, [agentId, count]);
+    headerRegistry
+      .get(workspaceId)
+      ?.update({ label: count > 0 ? `${count} pending` : undefined });
+  }, [workspaceId, count]);
 
   const badge = useMemo(
     () => ({
@@ -84,14 +94,12 @@ function ApprovalItem({
   theme,
   compact,
   item,
-  configured,
   pending,
   onDecide,
 }: {
-  theme: PluginButtonContentProps["theme"];
+  theme: PluginSurfaceProps["theme"];
   compact: boolean;
   item: { id: string; argv: string[]; host: string; caller: string; cwd: string; expiresIn: number };
-  configured: boolean;
   pending: boolean;
   onDecide(id: string, decision: "approve" | "deny"): void;
 }) {
@@ -113,7 +121,7 @@ function ApprovalItem({
         padding: 10,
         borderRadius: 8,
         backgroundColor: theme.colors.accent,
-        opacity: configured && !pending ? 1 : 0.5,
+        opacity: !pending ? 1 : 0.5,
       },
       deny: {
         flex: 1,
@@ -121,14 +129,14 @@ function ApprovalItem({
         borderRadius: 8,
         borderWidth: 1,
         borderColor: theme.colors.statusDanger,
-        opacity: configured && !pending ? 1 : 0.5,
+        opacity: !pending ? 1 : 0.5,
       },
       approveText: { color: theme.colors.accentForeground, textAlign: "center" as const },
       denyText: { color: theme.colors.statusDanger, textAlign: "center" as const },
     }),
-    [theme, compact, configured, pending],
+    [theme, compact, pending],
   );
-  const disabled = !configured || pending;
+  const disabled = pending;
   return (
     <View style={styles.card}>
       <Text style={styles.argv}>{item.argv.map((arg) => JSON.stringify(arg)).join(" ")}</Text>
@@ -160,14 +168,19 @@ function ApprovalItem({
   );
 }
 
-export function ApprovalPopover({ theme, layout }: PluginButtonContentProps) {
+export function ApprovalSurface({
+  theme,
+  layout,
+  onOpenSettings,
+}: PluginSurfaceProps & { onOpenSettings(): void }) {
   const toast = useToast();
   const query = usePendingList();
-  const settings = useSettings(approvalSettings);
+  const socketPath = useSocketPath();
   const decide = useRpc(verdict);
   const queryClient = useQueryClient();
   const mutation = useMutation({
-    mutationFn: (input: { id: string; decision: "approve" | "deny" }) => decide(input),
+    mutationFn: (input: { id: string; decision: "approve" | "deny" }) =>
+      decide({ ...input, socketPath }),
     onSuccess: (result, input) => {
       if (result.recorded) {
         toast.show(input.decision === "approve" ? "Approved — executing" : "Denied", {
@@ -183,34 +196,47 @@ export function ApprovalPopover({ theme, layout }: PluginButtonContentProps) {
 
   const styles = useMemo(
     () => ({
-      wrap: { padding: layout.compact ? 12 : 16, gap: 10, minWidth: 280 },
-      title: { color: theme.colors.foreground, fontSize: layout.compact ? 16 : 18 },
+      screen: { flex: 1, backgroundColor: theme.colors.surface0 },
+      wrap: { padding: layout.compact ? 16 : 24, gap: 10 },
+      title: { color: theme.colors.foreground, fontSize: layout.compact ? 20 : 24 },
+      info: { color: theme.colors.foregroundMuted, fontSize: 12 },
       body: { color: theme.colors.foreground, fontSize: 13 },
-      hint: { color: theme.colors.foregroundMuted, fontSize: 12 },
+      settingsButton: {
+        padding: 10,
+        borderRadius: 8,
+        backgroundColor: theme.colors.surface2,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+      },
+      settingsButtonText: { color: theme.colors.foreground, textAlign: "center" as const },
     }),
     [theme, layout.compact],
   );
 
-  const configured =
-    settings.status === "ready" && settings.values.approvers.trim().length > 0;
   const items = query.data?.items ?? [];
 
   return (
-    <ScrollView style={{ flexGrow: 0 }}>
+    <ScrollView style={styles.screen}>
       <View style={styles.wrap}>
         <Text style={styles.title}>2fado approvals</Text>
-        {settings.status === "ready" && !configured ? (
-          <Text style={styles.hint}>
-            No approvers configured — approvals disabled. Set them in Settings → Plugins →
-            2fado approval.
-          </Text>
-        ) : null}
+        <Text style={styles.info}>
+          Pending 2fado requests wait here until you approve or deny them. Nothing listed means
+          nothing waiting.
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Open 2fado settings"
+          style={styles.settingsButton}
+          onPress={onOpenSettings}
+        >
+          <Text style={styles.settingsButtonText}>2fado settings: socket path, Telegram fallback</Text>
+        </Pressable>
         {query.isPending ? <Text style={styles.body}>Loading…</Text> : null}
         {query.isError ? (
           <Text style={styles.body}>2fadod unreachable — check the socket path in settings.</Text>
         ) : null}
         {!query.isPending && !query.isError && items.length === 0 ? (
-          <Text style={styles.hint}>Nothing pending.</Text>
+          <Text style={styles.info}>Nothing pending.</Text>
         ) : null}
         {items.map((item) => (
           <ApprovalItem
@@ -218,7 +244,6 @@ export function ApprovalPopover({ theme, layout }: PluginButtonContentProps) {
             theme={theme}
             compact={layout.compact}
             item={item}
-            configured={configured}
             pending={mutation.isPending}
             onDecide={(id, decision) => mutation.mutate({ id, decision })}
           />

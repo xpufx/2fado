@@ -47,13 +47,15 @@ verdict = defineRpc({
 
 ## Server behavior (daemon subprocess, trusted)
 
-- Owns the socket to `2fadod` (path from plugin settings). Polls pending
-  (see `2fadod` change below) and fans out: toast per new id.
-- Verdict handler: checks caller against the **approver allowlist in
-  plugin settings** (fail closed when empty — no allowlist, no approvals),
-  submits `{id, decision}` over the `2fadod` socket as `by: "paseo:<user>"`,
-  returns `{recorded}`. Never trusts transport identity alone; the
-  allowlist check happens per verdict, at decision time.
+- Owns the socket to `2fadod` (path: `FADO_SOCKET` env, then
+  `/run/2fado.sock`, then `/tmp/2fado-live.sock`). Polls `list` and fans
+  out: toast per new id.
+- Verdict handler submits `{id, decision, by: "paseo"}` over the `2fadod`
+  socket and returns `{recorded}`. No per-call allowlist: v0.8 exposes no
+  clicker identity on either runtime, so a names list would be theater —
+  anyone holding the app can approve. Real gating belongs in `2fadod`
+  (paseo-approvers list, daemon-side); the audit `by` field is attribution
+  only.
 - Credentials/sockets stay in the handler, never in client code.
 
 ## `2fadod` change required (small, typed)
@@ -65,17 +67,16 @@ localhost socket + peercreds as today.
 
 ## Identity & attestation
 
-- Clicker identity comes from the Paseo session; the handler maps it to
-  the settings allowlist per call. Empty/missing allowlist ⇒ deny.
-- Verdicts carry `by: "paseo:<user>"` into the audit log next to
-  Telegram's numeric ids — one log, two transports, same schema.
+- v0.8 gives the plugin no verified clicker identity, so there is no
+  per-user allowlist on this transport. Verdicts carry `by: "paseo"` into
+  the audit log next to Telegram's numeric ids — one log, two transports,
+  same schema. Attribution only, never authority.
 - One-time tokens unchanged: first recorded verdict wins (store PK);
   replays and double-taps return `recorded: false`.
 
 ## Settings screen
 
-Socket path, approver allowlist (Paseo user ids), Telegram-fallback
-toggle. Fail-closed defaults throughout.
+Socket path, Telegram-fallback toggle. No names to save — see above.
 
 ## MVP scope / non-goals
 
