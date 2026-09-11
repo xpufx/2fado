@@ -28,6 +28,8 @@ interface DaemonPendingItem {
   uid: number;
   cwd: string;
   expires_in: number;
+  step?: string;
+  confirm_of?: string;
 }
 
 interface DaemonPendingList {
@@ -59,6 +61,8 @@ interface DaemonStatusResponse {
   by?: string;
   exit: number;
   output?: string;
+  step?: string;
+  confirm_of?: string;
 }
 
 function callDaemonOn(sock: string, message: unknown, timeoutMs: number): Promise<unknown> {
@@ -129,6 +133,8 @@ async function listPendingInner(
       caller: String(item.uid),
       cwd: item.cwd,
       expiresIn: item.expires_in,
+      step: item.step === "confirm" ? ("confirm" as const) : ("initial" as const),
+      confirmOf: item.confirm_of,
     })),
   };
 }
@@ -207,7 +213,17 @@ async function statusInner(
       { status: { id: input.id } },
       input.socketPath,
     )) as DaemonStatusResponse;
-    const validStatuses = ["not_found", "pending", "running", "completed", "denied", "timeout"] as const;
+    const validStatuses = [
+      "not_found",
+      "pending",
+      "confirming",
+      "running",
+      "completed",
+      "denied",
+      "timeout",
+      "client_aborted",
+      "confirmation_timeout",
+    ] as const;
     const rawStatus = raw?.status as (typeof validStatuses)[number];
     const status = validStatuses.includes(rawStatus) ? rawStatus : "not_found";
     return {
@@ -220,6 +236,8 @@ async function statusInner(
       argv: Array.isArray(raw?.argv) ? raw.argv : undefined,
       cwd: raw?.cwd,
       expiresIn: raw?.expires_in,
+      step: raw?.step,
+      confirmOf: raw?.confirm_of,
     };
   } catch (err) {
     log.warn("status fetch failed", { id: input.id, error: err });

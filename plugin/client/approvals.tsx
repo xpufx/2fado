@@ -39,21 +39,28 @@ const EXPIRY_URGENT_S = 30;
 const seenIds = new Set<string>();
 const SEEN_IDS_CAP = 500;
 
-function useNewPendingToast(items: Array<{ id: string }> | undefined) {
+function useNewPendingToast(
+  items: Array<{ id: string; step?: "initial" | "confirm" }> | undefined,
+) {
   const toast = useToast();
   useEffect(() => {
-    const fresh = (items ?? []).map((item) => item.id).filter((id) => !seenIds.has(id));
+    const fresh = (items ?? []).filter((item) => !seenIds.has(item.id));
     if (fresh.length === 0) return;
-    for (const id of fresh) seenIds.add(id);
+    for (const item of fresh) seenIds.add(item.id);
     while (seenIds.size > SEEN_IDS_CAP) {
       const oldest = seenIds.values().next();
       if (oldest.done) break;
       seenIds.delete(oldest.value);
     }
-    toast.show(
-      fresh.length === 1 ? "2fado approval needed" : `${fresh.length} 2fado approvals needed`,
-      { variant: "warning" },
-    );
+    const hasConfirm = fresh.some((item) => item.step === "confirm");
+    if (hasConfirm) {
+      toast.show("⚠️ Are you sure? 2fado confirmation required", { variant: "warning" });
+    } else {
+      toast.show(
+        fresh.length === 1 ? "2fado approval needed" : `${fresh.length} 2fado approvals needed`,
+        { variant: "warning" },
+      );
+    }
   }, [items, toast]);
 }
 const headerRegistry = new Map<string, PluginButtonRegistration>();
@@ -225,12 +232,22 @@ function ApprovalItem({
   deciding,
   onDecide,
 }: {
-  item: { id: string; argv: string[]; host: string; caller: string; cwd: string; expiresIn: number };
+  item: {
+    id: string;
+    argv: string[];
+    host: string;
+    caller: string;
+    cwd: string;
+    expiresIn: number;
+    step?: "initial" | "confirm";
+    confirmOf?: string;
+  };
   deciding?: "approve" | "deny";
   onDecide(item: { id: string; argv: string[]; cwd: string }, decision: "approve" | "deny"): void;
 }) {
   const { colors } = usePluginTheme();
   const [program] = item.argv;
+  const isConfirm = item.step === "confirm";
   const urgent = item.expiresIn <= EXPIRY_URGENT_S;
   const fontFamily = Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" });
   const isDeciding = Boolean(deciding);
@@ -240,11 +257,40 @@ function ApprovalItem({
       variant="elevated"
       style={{
         borderLeftWidth: 4,
-        borderLeftColor: urgent ? colors.statusDanger : colors.statusWarning,
+        borderLeftColor: isConfirm || urgent ? colors.statusDanger : colors.statusWarning,
         gap: 8,
         padding: 12,
       }}
     >
+      {isConfirm ? (
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+            backgroundColor: colors.statusDanger + "15",
+            borderColor: colors.statusDanger + "40",
+            borderWidth: 1,
+            borderRadius: 6,
+            paddingVertical: 6,
+            paddingHorizontal: 10,
+          }}
+        >
+          <Icon name="AlertTriangle" size={14} color={colors.statusDanger} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.statusDanger, fontSize: 12, fontWeight: "700" }}>
+              ARE YOU SURE? Tap again to run
+            </Text>
+            {item.confirmOf ? (
+              <Text style={{ color: colors.foregroundMuted, fontSize: 10 }}>
+                Second confirmation for #{item.confirmOf.slice(0, 8)}
+              </Text>
+            ) : null}
+          </View>
+          <Badge label="2-step" variant="danger" styleVariant="solid" />
+        </View>
+      ) : null}
+
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
           <View
@@ -252,12 +298,12 @@ function ApprovalItem({
               width: 22,
               height: 22,
               borderRadius: 4,
-              backgroundColor: urgent ? colors.statusDanger : colors.statusWarning,
+              backgroundColor: isConfirm || urgent ? colors.statusDanger : colors.statusWarning,
               alignItems: "center",
               justifyContent: "center",
             }}
           >
-            <Icon name="Terminal" size={12} color="#ffffff" />
+            <Icon name={isConfirm ? "AlertTriangle" : "Terminal"} size={12} color="#ffffff" />
           </View>
           <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "700", flex: 1 }}>
             {program ?? "(empty)"}
@@ -265,7 +311,7 @@ function ApprovalItem({
         </View>
         <Badge
           label={urgent ? `expires in ${item.expiresIn}s` : `${item.expiresIn}s left`}
-          variant={urgent ? "danger" : "warning"}
+          variant={urgent || isConfirm ? "danger" : "warning"}
           styleVariant="solid"
           icon="Timer"
         />
@@ -304,11 +350,11 @@ function ApprovalItem({
       <View style={{ flexDirection: "row", gap: 8, paddingTop: 2 }}>
         <View style={{ flex: 1 }}>
           <Button
-            label="Approve"
-            variant="primary"
+            label={isConfirm ? "Confirm & Run" : "Approve"}
+            variant={isConfirm ? "danger" : "primary"}
             size="sm"
-            icon="Check"
-            accessibilityLabel={`Approve ${item.id}`}
+            icon={isConfirm ? "AlertTriangle" : "Check"}
+            accessibilityLabel={`${isConfirm ? "Confirm" : "Approve"} ${item.id}`}
             loading={deciding === "approve"}
             disabled={isDeciding}
             onPress={() => onDecide(item, "approve")}
@@ -316,8 +362,8 @@ function ApprovalItem({
         </View>
         <View style={{ flex: 1 }}>
           <Button
-            label="Deny"
-            variant="danger"
+            label={isConfirm ? "Cancel & Deny" : "Deny"}
+            variant={isConfirm ? "secondary" : "danger"}
             size="sm"
             icon="X"
             accessibilityLabel={`Deny ${item.id}`}
@@ -345,13 +391,14 @@ function ExecutingItem({
 }) {
   const { colors } = usePluginTheme();
   const [program] = item.argv ?? ["(command)"];
+  const isConfirming = item.status === "confirming";
   const isCompleted = item.status === "completed";
   const isFailed = isCompleted && item.exit !== 0;
   const isSuccess = isCompleted && item.exit === 0;
 
   const statusColor = isSuccess
     ? colors.statusSuccess
-    : isFailed
+    : isFailed || isConfirming
       ? colors.statusWarning
       : colors.accent;
 
@@ -380,7 +427,7 @@ function ExecutingItem({
             }}
           >
             <Icon
-              name={isSuccess ? "Check" : isFailed ? "AlertTriangle" : "Activity"}
+              name={isSuccess ? "Check" : isFailed || isConfirming ? "AlertTriangle" : "Activity"}
               size={12}
               color="#ffffff"
             />
@@ -390,10 +437,18 @@ function ExecutingItem({
           </Text>
         </View>
         <Badge
-          label={isSuccess ? `exit ${item.exit}` : isFailed ? `exit ${item.exit}` : "running…"}
-          variant={isSuccess ? "success" : isFailed ? "warning" : "accent"}
+          label={
+            isSuccess
+              ? `exit ${item.exit}`
+              : isFailed
+                ? `exit ${item.exit}`
+                : isConfirming
+                  ? "confirming…"
+                  : "running…"
+          }
+          variant={isSuccess ? "success" : isFailed || isConfirming ? "warning" : "accent"}
           styleVariant="solid"
-          icon={isSuccess ? "Check" : isFailed ? "AlertTriangle" : "Activity"}
+          icon={isSuccess ? "Check" : isFailed || isConfirming ? "AlertTriangle" : "Activity"}
         />
       </View>
 
@@ -417,7 +472,9 @@ function ExecutingItem({
             ? isSuccess
               ? "Executed successfully"
               : `Failed with exit ${item.exit}`
-            : "Executing on host…"}
+            : isConfirming
+              ? "Step 1 approved · Awaiting 2nd confirmation…"
+              : "Executing on host…"}
         </Text>
       </View>
     </Card>
@@ -538,7 +595,15 @@ export function ApprovalSurface({
       {
         id: string;
         decision: "approve" | "deny";
-        status: "running" | "completed" | "denied" | "timeout" | "not_found";
+        status:
+          | "running"
+          | "confirming"
+          | "completed"
+          | "denied"
+          | "timeout"
+          | "not_found"
+          | "client_aborted"
+          | "confirmation_timeout";
         argv?: string[];
         cwd?: string;
         exit?: number;
@@ -605,6 +670,20 @@ export function ApprovalSurface({
             const statusRes = await getStatus({ id, socketPath });
             if (!isMountedRef.current) return;
 
+            if (statusRes.status === "confirming") {
+              setActiveExecutions((prev) => ({
+                ...prev,
+                [id]: {
+                  id,
+                  decision: "approve",
+                  status: "confirming",
+                  argv: statusRes.argv ?? item.argv,
+                  cwd: statusRes.cwd ?? item.cwd,
+                },
+              }));
+              void queryClient.invalidateQueries({ queryKey: LIST_KEY });
+            }
+
             if (statusRes.status === "completed") {
               setActiveExecutions((prev) => ({
                 ...prev,
@@ -642,15 +721,22 @@ export function ApprovalSurface({
             if (
               statusRes.status === "denied" ||
               statusRes.status === "timeout" ||
-              statusRes.status === "not_found"
+              statusRes.status === "not_found" ||
+              statusRes.status === "client_aborted" ||
+              statusRes.status === "confirmation_timeout"
             ) {
+              void queryClient.invalidateQueries({ queryKey: LIST_KEY });
               void queryClient.invalidateQueries({ queryKey: RECENT_KEY });
               setActiveExecutions((prev) => {
                 const next = { ...prev };
                 delete next[id];
                 return next;
               });
-              if (statusRes.status === "timeout") {
+              if (statusRes.status === "confirmation_timeout") {
+                toast.error("Confirmation timed out — command cancelled");
+              } else if (statusRes.status === "client_aborted") {
+                toast.error("Calling process aborted command");
+              } else if (statusRes.status === "timeout") {
                 toast.error("Execution timed out");
               }
               return;
