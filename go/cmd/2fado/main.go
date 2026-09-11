@@ -26,7 +26,7 @@ func main() {
 	}
 	sock := os.Getenv("FADO_SOCKET")
 	if sock == "" {
-		sock = "/run/2fado.sock"
+		sock = "/tmp/2fado.sock"
 	}
 	switch os.Args[1] {
 	case "daemon":
