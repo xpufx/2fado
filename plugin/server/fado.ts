@@ -7,7 +7,6 @@ import { pendingList, recentList, verdict } from "../shared/approval";
 const log = createPluginLogger("twofado", { banner: false });
 
 const DEFAULT_SOCKET = "/tmp/2fado.sock";
-const LIVE_SOCKET = "/tmp/2fado-live.sock";
 
 function socketCandidates(configured?: string): string[] {
   const candidates: string[] = [];
@@ -20,7 +19,6 @@ function socketCandidates(configured?: string): string[] {
   push(configured);
   push(process.env.FADO_SOCKET);
   push(DEFAULT_SOCKET);
-  push(LIVE_SOCKET);
   return candidates;
 }
 

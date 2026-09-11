@@ -28,6 +28,7 @@ const RECENT_LIMIT = 10;
 const OUTPUT_PREVIEW = 2000;
 
 const seenIds = new Set<string>();
+const SEEN_IDS_CAP = 500;
 
 function useNewPendingToast(items: Array<{ id: string }> | undefined) {
   const toast = useToast();
@@ -35,6 +36,11 @@ function useNewPendingToast(items: Array<{ id: string }> | undefined) {
     const fresh = (items ?? []).map((item) => item.id).filter((id) => !seenIds.has(id));
     if (fresh.length === 0) return;
     for (const id of fresh) seenIds.add(id);
+    while (seenIds.size > SEEN_IDS_CAP) {
+      const oldest = seenIds.values().next();
+      if (oldest.done) break;
+      seenIds.delete(oldest.value);
+    }
     toast.show(
       fresh.length === 1 ? "2fado approval needed" : `${fresh.length} 2fado approvals needed`,
       { variant: "warning" },
