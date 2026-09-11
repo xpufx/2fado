@@ -43,7 +43,7 @@ const settingsSchema = z.object({
 export type ApprovalSettingsValues = z.output<typeof settingsSchema>;
 
 export const approvalSettings = defineSettingsContract<ApprovalSettingsValues>({
-  name: "fado-approval.settings",
+  name: "twofado.settings",
   schema: settingsSchema,
   description: "2fado approval settings",
 });

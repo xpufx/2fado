@@ -19,7 +19,7 @@ import { useEffect } from "react";
 import { Text, View } from "react-native";
 import { approvalSettings, pendingList, verdict } from "../shared/approval";
 
-const LIST_KEY = ["fado-approval", "pending"];
+const LIST_KEY = ["twofado", "pending"];
 const POLL_MS = 3000;
 
 const seenIds = new Set<string>();

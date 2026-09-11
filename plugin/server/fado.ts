@@ -4,7 +4,7 @@ import type { RpcInput, RpcOutput } from "paseo-plugin-helper/shared";
 import { createPluginLogger, guardRpcHandler } from "paseo-plugin-helper/server";
 import { pendingList, verdict } from "../shared/approval";
 
-const log = createPluginLogger("fado-approval", { banner: false });
+const log = createPluginLogger("twofado", { banner: false });
 
 const DEFAULT_SOCKET = "/run/2fado.sock";
 const LIVE_SOCKET = "/tmp/2fado-live.sock";

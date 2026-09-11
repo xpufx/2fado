@@ -3,10 +3,10 @@ import { PluginStorage, createPluginLogger, registerSettingsRpc } from "paseo-pl
 import { approvalSettings, pendingList, verdict } from "./shared/approval";
 import { listPending, submitVerdict } from "./server/fado";
 
-const log = createPluginLogger("fado-approval");
+const log = createPluginLogger("twofado");
 
 export default function contribute(server: PluginServerContext) {
-  const storage = new PluginStorage("fado-approval", "settings.json", {
+  const storage = new PluginStorage("twofado", "settings.json", {
     defaultData: approvalSettings.defaultSettings,
     schema: approvalSettings.schema,
   });

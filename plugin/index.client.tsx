@@ -21,7 +21,7 @@ export default function contribute(client: PluginClientContext) {
   initClientHelpers({ Icon, Modal, useRpc, useToast, ScrollView });
 
   const Surface = (props: PluginSurfaceProps) => (
-    <ApprovalSurface {...props} onOpenSettings={() => client.openSettings("fado-approval")} />
+    <ApprovalSurface {...props} onOpenSettings={() => client.openSettings("twofado")} />
   );
   client.addSurface("approvals", Surface);
   client.addSidebarItem({
@@ -45,12 +45,12 @@ export default function contribute(client: PluginClientContext) {
     icon: "Settings",
     context: "global",
     onSelect({ openSettings }) {
-      openSettings("fado-approval");
+      openSettings("twofado");
     },
   });
 
   const removeSettingsScreen = registerHelperSettingsScreen(client, approvalSettings, {
-    id: "fado-approval",
+    id: "twofado",
     title: "2fado approval",
     icon: "ShieldCheck",
     ui: { SettingsCard, SettingsSection, SettingsSwitch, SettingsSelect, SettingsInput },
@@ -67,7 +67,7 @@ export default function contribute(client: PluginClientContext) {
     const { workspaceId } = update.agent;
     if (buttons.has(workspaceId)) return;
     const registration = client.addHeaderButton({
-      id: "fado-approval",
+      id: "twofado",
       workspaceId,
       button: {
         title: "2fado approvals",
