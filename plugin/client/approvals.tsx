@@ -10,6 +10,7 @@ import {
   Button,
   Card,
   CardHeader,
+  CodeBlock,
   PluginThemeProvider,
   usePluginSettings,
   usePluginTheme,
@@ -17,12 +18,29 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { Text, View } from "react-native";
-import { approvalSettings, pendingList, verdict } from "../shared/approval";
+import { approvalSettings, pendingList, recentList, verdict } from "../shared/approval";
 
 const LIST_KEY = ["twofado", "pending"];
+const RECENT_KEY = ["twofado", "recent"];
 const POLL_MS = 3000;
+const RECENT_POLL_MS = 5000;
+const RECENT_LIMIT = 10;
+const OUTPUT_PREVIEW = 2000;
 
 const seenIds = new Set<string>();
+
+function useNewPendingToast(items: Array<{ id: string }> | undefined) {
+  const toast = useToast();
+  useEffect(() => {
+    const fresh = (items ?? []).map((item) => item.id).filter((id) => !seenIds.has(id));
+    if (fresh.length === 0) return;
+    for (const id of fresh) seenIds.add(id);
+    toast.show(
+      fresh.length === 1 ? "2fado approval needed" : `${fresh.length} 2fado approvals needed`,
+      { variant: "warning" },
+    );
+  }, [items, toast]);
+}
 const headerRegistry = new Map<string, PluginButtonRegistration>();
 
 export function trackHeaderButton(workspaceId: string, registration: PluginButtonRegistration) {
@@ -52,24 +70,26 @@ export function usePendingList() {
   });
 }
 
+export function useRecentList() {
+  const recent = useRpc(recentList);
+  const socketPath = useSocketPath();
+  return useQuery({
+    queryKey: [...RECENT_KEY, socketPath ?? ""],
+    queryFn: () => recent({ socketPath, limit: RECENT_LIMIT }),
+    refetchInterval: RECENT_POLL_MS,
+    retry: false,
+  });
+}
+
 export function ApprovalHeaderIcon(props: PluginButtonIconProps) {
   const { theme } = props;
   const workspaceId = props.workspaceId;
   const size = props.size;
   const color = props.color;
-  const toast = useToast();
   const { data } = usePendingList();
   const count = data?.items.length ?? 0;
 
-  useEffect(() => {
-    const fresh = (data?.items ?? []).map((item) => item.id).filter((id) => !seenIds.has(id));
-    if (fresh.length === 0) return;
-    for (const id of fresh) seenIds.add(id);
-    toast.show(
-      fresh.length === 1 ? "2fado approval needed" : `${fresh.length} 2fado approvals needed`,
-      { variant: "warning" },
-    );
-  }, [data, toast]);
+  useNewPendingToast(data?.items);
 
   useEffect(() => {
     headerRegistry
@@ -127,6 +147,54 @@ function ApprovalItem({
   );
 }
 
+function RecentItem({
+  item,
+}: {
+  item: {
+    id: string;
+    argv: string[];
+    cwd: string;
+    decision: string;
+    by: string;
+    exit: number;
+    output: string;
+  };
+}) {
+  const { colors } = usePluginTheme();
+  const approved = item.decision === "approve";
+  const executed = item.exit >= 0;
+  const preview =
+    item.output.length > OUTPUT_PREVIEW
+      ? `${item.output.slice(0, OUTPUT_PREVIEW)}\n…[truncated]`
+      : item.output;
+  return (
+    <Card>
+      <CardHeader
+        title={item.argv.map((arg) => JSON.stringify(arg)).join(" ")}
+        subtitle={`${item.decision} · ${executed ? `exit ${item.exit}` : "not executed"} · by ${item.by || "?"}`}
+        icon="Terminal"
+      />
+      <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>{item.cwd}</Text>
+      <Badge
+        label={approved ? (executed && item.exit !== 0 ? `approved · exit ${item.exit}` : "approved") : item.decision}
+        variant={approved ? (executed && item.exit !== 0 ? "warning" : "success") : "danger"}
+        icon={approved ? "Check" : "X"}
+      />
+      {executed ? (
+        preview.length > 0 ? (
+          <CodeBlock code={preview} />
+        ) : (
+          <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>(no output)</Text>
+        )
+      ) : (
+        <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
+          No output — denied before execution.
+        </Text>
+      )}
+    </Card>
+  );
+}
+
 export function ApprovalSurface({
   theme,
   layout,
@@ -134,6 +202,7 @@ export function ApprovalSurface({
 }: PluginSurfaceProps & { onOpenSettings(): void }) {
   const toast = useToast();
   const query = usePendingList();
+  const recent = useRecentList();
   const socketPath = useSocketPath();
   const decide = useRpc(verdict);
   const queryClient = useQueryClient();
@@ -149,11 +218,15 @@ export function ApprovalSurface({
         toast.error("Already decided or 2fadod unreachable.");
       }
       void queryClient.invalidateQueries({ queryKey: LIST_KEY });
+      void queryClient.invalidateQueries({ queryKey: RECENT_KEY });
     },
     onError: () => toast.error("Verdict failed — 2fadod unreachable."),
   });
 
+  useNewPendingToast(query.data?.items);
+
   const items = query.data?.items ?? [];
+  const recentItems = recent.data?.items ?? [];
 
   return (
     <PluginThemeProvider theme={{ colors: theme.colors }} layout={layout}>
@@ -193,6 +266,23 @@ export function ApprovalSurface({
               pending={mutation.isPending}
               onDecide={(id, decision) => mutation.mutate({ id, decision })}
             />
+          ))}
+          <Card>
+            <CardHeader title="Recent approvals" icon="History" />
+            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
+              Decided requests with their exit status and execution output.
+            </Text>
+          </Card>
+          {recent.isPending ? (
+            <Text style={{ color: theme.colors.foreground, fontSize: 13 }}>Loading…</Text>
+          ) : null}
+          {!recent.isPending && recentItems.length === 0 ? (
+            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
+              Nothing decided yet.
+            </Text>
+          ) : null}
+          {recentItems.map((item) => (
+            <RecentItem key={item.id} item={item} />
           ))}
         </View>
       </ScrollView>

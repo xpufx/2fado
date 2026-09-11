@@ -2,7 +2,7 @@ import net from "node:net";
 import os from "node:os";
 import type { RpcInput, RpcOutput } from "paseo-plugin-helper/shared";
 import { createPluginLogger, guardRpcHandler } from "paseo-plugin-helper/server";
-import { pendingList, verdict } from "../shared/approval";
+import { pendingList, recentList, verdict } from "../shared/approval";
 
 const log = createPluginLogger("twofado", { banner: false });
 
@@ -34,6 +34,20 @@ interface DaemonPendingItem {
 
 interface DaemonPendingList {
   items: DaemonPendingItem[];
+}
+
+interface DaemonRecentItem {
+  id: string;
+  argv: string[];
+  cwd: string;
+  decision: string;
+  by: string;
+  exit: number;
+  output: string;
+}
+
+interface DaemonRecentList {
+  items: DaemonRecentItem[];
 }
 
 function callDaemonOn(sock: string, message: unknown, timeoutMs: number): Promise<unknown> {
@@ -131,6 +145,37 @@ export const listPending = guardRpcHandler(listPendingInner, {
   maxInflight: 4,
   onTimeout: (info) => log.warn("list timed out", info),
   onSaturated: (info) => log.warn("list saturated, shedding load", info),
+});
+
+async function listRecentInner(
+  input?: RpcInput<typeof recentList>,
+): Promise<RpcOutput<typeof recentList>> {
+  const limit = input?.limit ?? 10;
+  try {
+    const raw = (await callDaemon({ recent: { limit } }, input?.socketPath)) as DaemonRecentList;
+    const items = Array.isArray(raw.items) ? raw.items : [];
+    return {
+      items: items.map((item) => ({
+        id: item.id,
+        argv: Array.isArray(item.argv) ? item.argv : [],
+        cwd: typeof item.cwd === "string" ? item.cwd : "",
+        decision: typeof item.decision === "string" ? item.decision : "",
+        by: typeof item.by === "string" ? item.by : "",
+        exit: typeof item.exit === "number" ? item.exit : -1,
+        output: typeof item.output === "string" ? item.output : "",
+      })),
+    };
+  } catch (err) {
+    log.warn("recent list failed", { error: err });
+    return { items: [] };
+  }
+}
+
+export const listRecent = guardRpcHandler(listRecentInner, {
+  timeoutMs: 5000,
+  maxInflight: 4,
+  onTimeout: (info) => log.warn("recent timed out", info),
+  onSaturated: (info) => log.warn("recent saturated, shedding load", info),
 });
 
 export const submitVerdict = guardRpcHandler(submitVerdictInner, {

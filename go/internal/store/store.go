@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -122,6 +123,83 @@ func (s Store) Verdict(rid string) *protocol.VerdictRecord {
 		return nil
 	}
 	return &v
+}
+
+// ResultRecord persists an execution outcome next to its verdict so the
+// plugin can show command + exit + output after the fact.
+func (s Store) SaveResult(rid string, exit int, output string) {
+	if len(output) > 8192 {
+		output = output[:8192] + "\n…[truncated]"
+	}
+	data, err := json.Marshal(protocol.RecentItem{ID: rid, Exit: exit, Output: output})
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(s.Pending, rid+".result"), data, 0o600)
+}
+
+func (s Store) loadResult(rid string) (int, string) {
+	data, err := os.ReadFile(filepath.Join(s.Pending, rid+".result"))
+	if err != nil {
+		return -1, ""
+	}
+	var r protocol.RecentItem
+	if err := json.Unmarshal(data, &r); err != nil {
+		return -1, ""
+	}
+	return r.Exit, r.Output
+}
+
+// Recent returns decided records, newest first, capped at limit.
+func (s Store) Recent(limit int) []protocol.RecentItem {
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+	entries, err := os.ReadDir(s.Pending)
+	if err != nil {
+		return nil
+	}
+	type decided struct {
+		rid string
+		mod time.Time
+	}
+	var found []decided
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".verdict") {
+			continue
+		}
+		rid := strings.TrimSuffix(name, ".verdict")
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		found = append(found, decided{rid: rid, mod: info.ModTime()})
+	}
+	sort.Slice(found, func(i, j int) bool { return found[i].mod.After(found[j].mod) })
+	if len(found) > limit {
+		found = found[:limit]
+	}
+	var out []protocol.RecentItem
+	for _, f := range found {
+		rec, err := s.Load(f.rid)
+		if err != nil {
+			continue
+		}
+		v := s.Verdict(f.rid)
+		if v == nil {
+			continue
+		}
+		exit, output := s.loadResult(f.rid)
+		out = append(out, protocol.RecentItem{
+			ID: f.rid, Argv: rec.Argv, Cwd: rec.Cwd,
+			Decision: v.Decision, By: v.By, Exit: exit, Output: output,
+		})
+	}
+	if out == nil {
+		out = []protocol.RecentItem{}
+	}
+	return out
 }
 
 func (s Store) Append(ev protocol.AuditEvent) {

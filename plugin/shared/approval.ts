@@ -30,6 +30,28 @@ export const verdict = defineContract({
   description: "Record an approve/deny verdict for a 2fado request",
 });
 
+export const recentList = defineContract({
+  name: "approval.recent",
+  input: z.object({
+    socketPath: z.string().min(1).optional(),
+    limit: z.number().int().min(1).max(50).optional(),
+  }),
+  output: z.object({
+    items: z.array(
+      z.object({
+        id: z.string(),
+        argv: z.array(z.string()),
+        cwd: z.string(),
+        decision: z.string(),
+        by: z.string(),
+        exit: z.number(),
+        output: z.string(),
+      }),
+    ),
+  }),
+  description: "List recently decided 2fado requests with execution results",
+});
+
 const settingsSchema = z.object({
   socketPath: z
     .string()

@@ -29,6 +29,7 @@ type ClientMessage struct {
 	Run     *RunRequest    `json:"run,omitempty"`
 	Verdict *VerdictSubmit `json:"verdict,omitempty"`
 	List    *ListRequest   `json:"list,omitempty"`
+	Recent  *RecentRequest `json:"recent,omitempty"`
 }
 
 // ListRequest asks for pending records (plugin server polls this).
@@ -46,6 +47,28 @@ type PendingItem struct {
 // PendingList answers ListRequest: unexpired, undecided records only.
 type PendingList struct {
 	Items []PendingItem `json:"items"`
+}
+
+// RecentRequest asks for recently decided records (newest first).
+type RecentRequest struct {
+	Limit int `json:"limit,omitempty"`
+}
+
+// RecentItem is one decided record with its verdict and execution result.
+// Exit is -1 and Output empty when nothing executed (denied/timeout).
+type RecentItem struct {
+	ID       string   `json:"id"`
+	Argv     []string `json:"argv"`
+	Cwd      string   `json:"cwd"`
+	Decision string   `json:"decision"`
+	By       string   `json:"by,omitempty"`
+	Exit     int      `json:"exit"`
+	Output   string   `json:"output,omitempty"`
+}
+
+// RecentList answers RecentRequest: decided records, newest first.
+type RecentList struct {
+	Items []RecentItem `json:"items"`
 }
 
 // RunResult is the daemon's final answer to a run request.

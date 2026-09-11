@@ -81,6 +81,8 @@ func handle(svc service.Service, c net.Conn) {
 		out, _ = json.Marshal(res)
 	case msg.List != nil:
 		out, _ = json.Marshal(svc.List())
+	case msg.Recent != nil:
+		out, _ = json.Marshal(svc.Recent(msg.Recent.Limit))
 	default:
 		return
 	}

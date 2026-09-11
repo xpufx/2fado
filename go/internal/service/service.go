@@ -175,6 +175,7 @@ func (s Service) Run(req protocol.RunRequest, uid uint32) protocol.RunResult {
 		RID: rid, Decision: decision, By: by})
 	if decision != "approve" {
 		s.closeCard(rid, req, uid, decision)
+		s.Store.SaveResult(rid, -1, "")
 		return protocol.RunResult{Status: "denied", Reason: decision}
 	}
 	if s.needsConfirm(req.Argv) {
@@ -222,6 +223,7 @@ func (s Service) confirm(rid1 string, req protocol.RunRequest, uid uint32, clean
 		RID: rid, Decision: decision, By: cby})
 	s.closeCard(rid, req, uid, decision)
 	if decision != "approve" {
+		s.Store.SaveResult(rid, -1, "")
 		return protocol.RunResult{Status: "denied", Reason: decision}
 	}
 	return s.runApproved(rid, req, uid, clean)
@@ -231,6 +233,7 @@ func (s Service) runApproved(rid string, req protocol.RunRequest, uid uint32, cl
 	code, out, asUID := s.Execute(req.Argv, req.Cwd, clean)
 	s.Store.Append(protocol.AuditEvent{Ev: "exec", Argv: req.Argv,
 		RID: rid, AsUID: asUID, Exit: code, Dry: s.Conf.DryRun})
+	s.Store.SaveResult(rid, code, out)
 	return protocol.RunResult{Status: "allowed", Exit: code, Output: out}
 }
 
@@ -241,6 +244,15 @@ func (s Service) List() protocol.PendingList {
 		items = []protocol.PendingItem{}
 	}
 	return protocol.PendingList{Items: items}
+}
+
+// Recent answers the plugin's history poll: decided records, newest first.
+func (s Service) Recent(limit int) protocol.RecentList {
+	items := s.Store.Recent(limit)
+	if items == nil {
+		items = []protocol.RecentItem{}
+	}
+	return protocol.RecentList{Items: items}
 }
 
 // Submit records a local verdict (PoC path; production: SSO-bound UI).
