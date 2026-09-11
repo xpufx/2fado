@@ -15,6 +15,16 @@ export const pendingList = defineContract({
         expiresIn: z.number(),
         step: z.enum(["initial", "confirm"]).default("initial"),
         confirmOf: z.string().optional(),
+        preview: z
+          .object({
+            resolvedBinary: z.string().optional(),
+            targetCwd: z.string().optional(),
+            affectedCount: z.number().optional(),
+            samplePaths: z.array(z.string()).optional(),
+            riskLevel: z.enum(["low", "medium", "high", "critical"]).optional(),
+            riskReason: z.string().optional(),
+          })
+          .optional(),
       }),
     ),
   }),
@@ -86,6 +96,38 @@ export const approvalStatus = defineContract({
   description: "Query status and execution outcome of a 2fado request by ID",
 });
 
+export const approvalTelegramInfo = defineContract({
+  name: "approval.telegram_info",
+  input: z.object({
+    socketPath: z.string().min(1).optional(),
+  }),
+  output: z.object({
+    configured: z.boolean(),
+    botUsername: z.string().optional(),
+    chatId: z.string().optional(),
+    approvers: z.array(z.string()).default([]),
+    status: z.enum(["connected", "disconnected", "unconfigured", "error"]).default("unconfigured"),
+    error: z.string().optional(),
+  }),
+  description: "Query Telegram bot connectivity status and recipient metadata",
+});
+
+export const approvalTelegramSetConfig = defineContract({
+  name: "approval.telegram_set_config",
+  input: z.object({
+    botToken: z.string().optional(),
+    chatId: z.string().optional(),
+    approvers: z.array(z.string()).optional(),
+    socketPath: z.string().min(1).optional(),
+  }),
+  output: z.object({
+    success: z.boolean(),
+    botUsername: z.string().optional(),
+    error: z.string().optional(),
+  }),
+  description: "Send updated Telegram recipient credentials to 2fadod",
+});
+
 const settingsSchema = z.object({
   socketPath: z
     .string()
@@ -94,6 +136,9 @@ const settingsSchema = z.object({
     .default("/tmp/2fado.sock")
     .describe("2fadod socket"),
   telegramFallback: z.boolean().default(true).describe("Telegram fallback"),
+  telegramBotToken: z.string().default("").describe("Telegram bot token"),
+  telegramChatId: z.string().default("").describe("Telegram chat ID"),
+  telegramApprovers: z.string().default("").describe("Telegram approvers"),
 });
 
 export type ApprovalSettingsValues = z.output<typeof settingsSchema>;

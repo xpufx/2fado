@@ -2,7 +2,15 @@ import net from "node:net";
 import os from "node:os";
 import type { RpcInput, RpcOutput } from "paseo-plugin-helper/shared";
 import { createPluginLogger, guardRpcHandler } from "paseo-plugin-helper/server";
-import { approvalStatus, pendingList, recentList, verdict } from "../shared/approval";
+import {
+  approvalSettings,
+  approvalStatus,
+  approvalTelegramInfo,
+  approvalTelegramSetConfig,
+  pendingList,
+  recentList,
+  verdict,
+} from "../shared/approval";
 
 const log = createPluginLogger("twofado", { banner: false });
 
@@ -30,6 +38,14 @@ interface DaemonPendingItem {
   expires_in: number;
   step?: string;
   confirm_of?: string;
+  preview?: {
+    resolved_binary?: string;
+    target_cwd?: string;
+    affected_count?: number;
+    sample_paths?: string[];
+    risk_level?: "low" | "medium" | "high" | "critical";
+    risk_reason?: string;
+  };
 }
 
 interface DaemonPendingList {
@@ -135,6 +151,16 @@ async function listPendingInner(
       expiresIn: item.expires_in,
       step: item.step === "confirm" ? ("confirm" as const) : ("initial" as const),
       confirmOf: item.confirm_of,
+      preview: item.preview
+        ? {
+            resolvedBinary: item.preview.resolved_binary,
+            targetCwd: item.preview.target_cwd,
+            affectedCount: item.preview.affected_count,
+            samplePaths: item.preview.sample_paths,
+            riskLevel: item.preview.risk_level,
+            riskReason: item.preview.risk_reason,
+          }
+        : undefined,
     })),
   };
 }
@@ -250,4 +276,96 @@ export const getStatus = guardRpcHandler(statusInner, {
   maxInflight: 4,
   onTimeout: (info) => log.warn("status timed out", info),
   onSaturated: (info) => log.warn("status saturated, shedding load", info),
+});
+
+interface DaemonTelegramInfoResponse {
+  configured?: boolean;
+  bot_username?: string;
+  chat_id?: string;
+  approvers?: string[];
+  status?: "connected" | "disconnected" | "unconfigured" | "error";
+  error?: string;
+}
+
+async function telegramInfoInner(
+  input?: RpcInput<typeof approvalTelegramInfo>,
+): Promise<RpcOutput<typeof approvalTelegramInfo>> {
+  try {
+    const raw = (await callDaemon(
+      { telegram_info: {} },
+      input?.socketPath,
+    )) as DaemonTelegramInfoResponse;
+    const validStatuses = ["connected", "disconnected", "unconfigured", "error"] as const;
+    const rawStatus = raw?.status as (typeof validStatuses)[number];
+    const status = validStatuses.includes(rawStatus)
+      ? rawStatus
+      : raw?.configured
+        ? "connected"
+        : "unconfigured";
+    return {
+      configured: Boolean(raw?.configured),
+      botUsername: raw?.bot_username,
+      chatId: raw?.chat_id,
+      approvers: Array.isArray(raw?.approvers) ? raw.approvers : [],
+      status,
+      error: raw?.error,
+    };
+  } catch (err) {
+    log.warn("telegram info fetch failed", { error: err });
+    return {
+      configured: false,
+      status: "unconfigured",
+      approvers: [],
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+export const getTelegramInfo = guardRpcHandler(telegramInfoInner, {
+  timeoutMs: 5000,
+  maxInflight: 4,
+  onTimeout: (info) => log.warn("telegram info timed out", info),
+  onSaturated: (info) => log.warn("telegram info saturated, shedding load", info),
+});
+
+interface DaemonTelegramConfigResponse {
+  success?: boolean;
+  bot_username?: string;
+  error?: string;
+}
+
+async function telegramSetConfigInner(
+  input?: RpcInput<typeof approvalTelegramSetConfig>,
+): Promise<RpcOutput<typeof approvalTelegramSetConfig>> {
+  if (!input) return { success: false, error: "missing input" };
+  try {
+    const raw = (await callDaemon(
+      {
+        telegram_set_config: {
+          bot_token: input.botToken,
+          chat_id: input.chatId,
+          approvers: input.approvers,
+        },
+      },
+      input.socketPath,
+    )) as DaemonTelegramConfigResponse;
+    return {
+      success: Boolean(raw?.success),
+      botUsername: raw?.bot_username,
+      error: raw?.error,
+    };
+  } catch (err) {
+    log.warn("telegram set config failed", { error: err });
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+export const setTelegramConfig = guardRpcHandler(telegramSetConfigInner, {
+  timeoutMs: 5000,
+  maxInflight: 4,
+  onTimeout: (info) => log.warn("telegram set config timed out", info),
+  onSaturated: (info) => log.warn("telegram set config saturated, shedding load", info),
 });

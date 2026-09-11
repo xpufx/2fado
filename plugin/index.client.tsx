@@ -54,10 +54,19 @@ export default function contribute(client: PluginClientContext) {
     title: "2fado approval",
     icon: "ShieldCheck",
     ui: { SettingsCard, SettingsSection, SettingsSwitch, SettingsSelect, SettingsInput },
-    labels: { socketPath: "2fadod socket", telegramFallback: "Telegram fallback" },
+    labels: {
+      socketPath: "2fadod socket",
+      telegramFallback: "Telegram fallback",
+      telegramBotToken: "Telegram bot token",
+      telegramChatId: "Telegram chat ID",
+      telegramApprovers: "Authorized approvers",
+    },
     descriptions: {
       socketPath: "Daemon-local path. The app sends it with every call; the server tries it first.",
       telegramFallback: "Keep paging over Telegram until the Paseo path proves itself.",
+      telegramBotToken: "Bot token from @BotFather (e.g. 123456:ABC-DEF...). Synced to daemon config.",
+      telegramChatId: "Target Telegram chat or channel ID (e.g. -100123456789 or 12345678).",
+      telegramApprovers: "Comma-separated Telegram usernames authorized to approve (e.g. @alice, @bob).",
     },
   });
 

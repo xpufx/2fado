@@ -23,6 +23,7 @@ import { Platform, Pressable, Text, View } from "react-native";
 import {
   approvalSettings,
   approvalStatus,
+  approvalTelegramInfo,
   pendingList,
   recentList,
   verdict,
@@ -99,6 +100,19 @@ export function useRecentList() {
     queryKey: [...RECENT_KEY, socketPath ?? ""],
     queryFn: () => recent({ socketPath, limit: RECENT_LIMIT }),
     refetchInterval: RECENT_POLL_MS,
+    retry: false,
+  });
+}
+
+const TELEGRAM_KEY = ["twofado", "telegram"];
+
+export function useTelegramInfo() {
+  const getTelegram = useRpc(approvalTelegramInfo);
+  const socketPath = useSocketPath();
+  return useQuery({
+    queryKey: [...TELEGRAM_KEY, socketPath ?? ""],
+    queryFn: () => getTelegram({ socketPath }),
+    refetchInterval: 15_000,
     retry: false,
   });
 }
@@ -241,6 +255,14 @@ function ApprovalItem({
     expiresIn: number;
     step?: "initial" | "confirm";
     confirmOf?: string;
+    preview?: {
+      resolvedBinary?: string;
+      targetCwd?: string;
+      affectedCount?: number;
+      samplePaths?: string[];
+      riskLevel?: "low" | "medium" | "high" | "critical";
+      riskReason?: string;
+    };
   };
   deciding?: "approve" | "deny";
   onDecide(item: { id: string; argv: string[]; cwd: string }, decision: "approve" | "deny"): void;
@@ -346,6 +368,89 @@ function ApprovalItem({
           </Text>
         </View>
       </View>
+
+      <Collapsible
+        title={
+          item.preview?.riskLevel === "critical" || item.preview?.riskLevel === "high"
+            ? `Impact Preview · ${item.preview.riskLevel.toUpperCase()} RISK`
+            : "Impact Preview"
+        }
+        icon={
+          item.preview?.riskLevel === "critical" || item.preview?.riskLevel === "high"
+            ? "AlertTriangle"
+            : "Terminal"
+        }
+        initiallyExpanded={item.preview?.riskLevel === "critical" || item.preview?.riskLevel === "high"}
+      >
+        <View style={{ gap: 6, paddingTop: 4 }}>
+          {item.preview?.riskReason ? (
+            <View
+              style={{
+                backgroundColor: colors.statusDanger + "15",
+                borderColor: colors.statusDanger + "40",
+                borderWidth: 1,
+                borderRadius: 6,
+                padding: 8,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <Icon name="AlertTriangle" size={13} color={colors.statusDanger} />
+              <Text style={{ color: colors.statusDanger, fontSize: 11, fontWeight: "600", flex: 1 }}>
+                {item.preview.riskReason}
+              </Text>
+            </View>
+          ) : null}
+
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>Resolved Binary</Text>
+            <Text style={{ color: colors.foreground, fontSize: 11, fontFamily, fontWeight: "600" }}>
+              {item.preview?.resolvedBinary ?? `/usr/bin/${program ?? "command"}`}
+            </Text>
+          </View>
+
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>Target Directory</Text>
+            <Text
+              numberOfLines={1}
+              ellipsizeMode="middle"
+              style={{ color: colors.foreground, fontSize: 11, fontFamily, maxWidth: 220 }}
+            >
+              {item.preview?.targetCwd ?? item.cwd}
+            </Text>
+          </View>
+
+          {item.preview?.affectedCount !== undefined ? (
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>Affected Files</Text>
+              <Badge
+                label={`${item.preview.affectedCount} target${item.preview.affectedCount === 1 ? "" : "s"}`}
+                variant={item.preview.affectedCount > 10 ? "warning" : "neutral"}
+                styleVariant="tinted"
+              />
+            </View>
+          ) : null}
+
+          {item.preview?.samplePaths && item.preview.samplePaths.length > 0 ? (
+            <View style={{ gap: 2, marginTop: 4 }}>
+              <Text style={{ color: colors.foregroundMuted, fontSize: 10, fontWeight: "600" }}>
+                Target Samples:
+              </Text>
+              {item.preview.samplePaths.slice(0, 3).map((p, idx) => (
+                <Text
+                  key={idx}
+                  numberOfLines={1}
+                  ellipsizeMode="middle"
+                  style={{ color: colors.foregroundMuted, fontSize: 10, fontFamily }}
+                >
+                  • {p}
+                </Text>
+              ))}
+            </View>
+          ) : null}
+        </View>
+      </Collapsible>
 
       <View style={{ flexDirection: "row", gap: 8, paddingTop: 2 }}>
         <View style={{ flex: 1 }}>
@@ -564,6 +669,70 @@ function RecentItem({
         </Collapsible>
       ) : null}
     </Card>
+  );
+}
+
+function TelegramStatusBar({ onOpenSettings }: { onOpenSettings(): void }) {
+  const { colors } = usePluginTheme();
+  const tg = useTelegramInfo();
+  const info = tg.data;
+
+  if (tg.isPending && !info) return null;
+
+  const isConnected = info?.status === "connected" || Boolean(info?.configured);
+  const badgeVariant = isConnected ? "success" : info?.status === "error" ? "danger" : "neutral";
+
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        backgroundColor: colors.surface1,
+        borderColor: colors.border,
+        borderWidth: 1,
+        borderRadius: 6,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        gap: 8,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1 }}>
+        <Icon
+          name="Send"
+          size={12}
+          color={isConnected ? colors.statusSuccess : colors.foregroundMuted}
+        />
+        <Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "600" }}>
+          Telegram {isConnected ? "Active" : "Fallback"}
+        </Text>
+        {info?.botUsername ? (
+          <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>
+            @{info.botUsername}
+          </Text>
+        ) : null}
+        {info?.chatId ? (
+          <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>
+            · Chat {info.chatId}
+          </Text>
+        ) : null}
+      </View>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <Badge
+          label={isConnected ? "connected" : "unconfigured"}
+          variant={badgeVariant}
+          styleVariant="tinted"
+        />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Configure Telegram settings"
+          onPress={onOpenSettings}
+          style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, padding: 2 })}
+        >
+          <Icon name="Settings" size={13} color={colors.foregroundMuted} />
+        </Pressable>
+      </View>
+    </View>
   );
 }
 
@@ -828,6 +997,8 @@ export function ApprovalSurface({
               onPress={onOpenSettings}
             />
           </View>
+
+          <TelegramStatusBar onOpenSettings={onOpenSettings} />
 
           <SectionHeader title="Pending" count={query.data ? items.length : undefined} />
           {query.isPending ? (
