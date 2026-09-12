@@ -17,6 +17,7 @@ Unlike the `coding-agent` skill (which governs single-issue code modification in
 2. **Deterministic Pre-Flight**: Before requesting human testing or signoff, query agents and working trees to catch pending administrative prerequisites (version increments, unpushed commits, unbuilt bundles, daemon restarts).
 3. **Explicit Boundary of Responsibility**: Every proposal to the user must explicitly distinguish between **Agent Autonomous Actions** and **Operator Actions** (actions requiring human intervention, credentials, 2FA, or physical device testing).
 4. **Autonomous Dispatch & Orchestration**: Once a specification is approved (`spec/2-approved`), the Orchestrator has full autonomous authority to schedule, assign, and dispatch worker agents across the fleet without asking for human operator permission. Human gates apply strictly to raw issue checklist approvals (`spec/1-checklist` -> `spec/2-approved`), irreversible external actions (e.g. `npm publish` / 2FA), and final device signoff (`state/verify`).
+5. **Fleet Model Tiering & Profile Enforcement (`list_profiles`)**: When spawning coding workers via `create_agent`, the Orchestrator **MUST** consult `list_profiles` and strictly adhere to configured profile tiers. Sub-agents must default to the primary contributor tier (**Muse Free**: `pufaysokt/opencode/muse-spark-1.3-contributor-free`, mode: `build`, thinking: `minimal`), falling back to **Muse Paid** only if quota is exhausted. High-cost models (e.g. Gemini) are reserved for orchestrators and **MUST NEVER** be used for delegated sub-agents.
 
 ---
 
