@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -46,11 +47,9 @@ func Serve(svc service.Service) error {
 	if err := svc.Store.Init(); err != nil {
 		return err
 	}
-	if !svc.Conf.Placeholder() {
-		go svc.TG.Poll(svc.Store.GetOffset(), svc.Approvers, svc.Verdicts, svc.Store.SetOffset)
-	} else {
-		fmt.Println("2fadod: no BOT_TOKEN configured, pager=stdout; verdicts via `2fado approve|deny <id>`")
-	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc.StartTelegram(ctx)
 	go svc.TelegramPump()
 	fmt.Printf("2fadod listening on %s (state %s)\n", svc.Conf.Socket, svc.Conf.StateDir)
 	for {
@@ -93,6 +92,10 @@ func handle(svc service.Service, c net.Conn) {
 		out, _ = json.Marshal(svc.Recent(msg.Recent.Limit))
 	case msg.Status != nil:
 		out, _ = json.Marshal(svc.Status(msg.Status.ID))
+	case msg.TelegramInfo != nil:
+		out, _ = json.Marshal(svc.TelegramInfo())
+	case msg.TelegramSetConfig != nil:
+		out, _ = json.Marshal(svc.TelegramSetConfig(*msg.TelegramSetConfig))
 	default:
 		return
 	}

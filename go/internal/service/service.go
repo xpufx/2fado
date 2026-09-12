@@ -6,6 +6,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -29,6 +31,19 @@ var envDeny = regexp.MustCompile(`^(LD_|PYTHON|PERL|RUBYOPT|NODE_|BASH_ENV|ENV=|
 
 const safePath = "/usr/sbin:/usr/bin:/sbin:/bin"
 
+type dynamicState struct {
+	mu          sync.RWMutex
+	cancelPoll  context.CancelFunc
+	botUsername string
+	tgStatus    string // "connected" | "disconnected" | "unconfigured" | "error"
+	tgError     string
+	botToken    string
+	chatID      string
+	approvers   []string
+	approverSet map[string]bool
+	tgClient    telegram.Client
+}
+
 type Service struct {
 	Conf      config.Conf
 	Policy    policy.Policy
@@ -37,18 +52,33 @@ type Service struct {
 	Approvers map[string]bool
 	Host      string
 	Verdicts  chan telegram.Verdict
+	state     *dynamicState
 }
 
 func New(c config.Conf) Service {
 	host, _ := os.Hostname()
+	tg := telegram.New(c.BotToken)
+	appSet := c.ApproverSet()
+	st := &dynamicState{
+		botToken:    c.BotToken,
+		chatID:      c.ChatID,
+		approvers:   c.Approvers,
+		approverSet: appSet,
+		tgClient:    tg,
+		tgStatus:    "unconfigured",
+	}
+	if !c.Placeholder() {
+		st.tgStatus = "connected"
+	}
 	return Service{
 		Conf:      c,
 		Policy:    policy.Load(c.Policy),
 		Store:     store.New(c.StateDir),
-		TG:        telegram.New(c.BotToken),
-		Approvers: c.ApproverSet(),
+		TG:        tg,
+		Approvers: appSet,
 		Host:      host,
 		Verdicts:  make(chan telegram.Verdict, 64),
+		state:     st,
 	}
 }
 
@@ -235,8 +265,8 @@ func (s Service) confirm(rid1 string, req protocol.RunRequest, uid uint32, clean
 		By:        by,
 	})
 	left := int64(s.Conf.Timeout)
-	if !s.Conf.Placeholder() && rec1.ChatID != "" {
-		s.TG.Edit(rec1.ChatID, rec1.MsgID, telegram.Card(s.Host, req.Argv,
+	if !s.isPlaceholder() && rec1.ChatID != "" {
+		s.activeTG().Edit(rec1.ChatID, rec1.MsgID, telegram.Card(s.Host, req.Argv,
 			uid, req.Cwd, rid, left, "confirm", s.Conf.DryRun),
 			telegram.Buttons(rid))
 	} else {
@@ -392,20 +422,79 @@ func (s Service) chatID() string {
 	return ""
 }
 
+func (s Service) getState() *dynamicState {
+	return s.state
+}
+
+func (s Service) isPlaceholder() bool {
+	if s.state != nil {
+		s.state.mu.RLock()
+		tok := s.state.botToken
+		s.state.mu.RUnlock()
+		return tok == "" || strings.HasPrefix(tok, "__")
+	}
+	return s.Conf.Placeholder()
+}
+
+func (s Service) activeChatID() string {
+	if s.state != nil {
+		s.state.mu.RLock()
+		cid := s.state.chatID
+		approvers := s.state.approvers
+		s.state.mu.RUnlock()
+		if cid != "" {
+			return cid
+		}
+		if len(approvers) > 0 {
+			return approvers[0]
+		}
+	}
+	return s.chatID()
+}
+
+func (s Service) activeApprovers() map[string]bool {
+	if s.state != nil {
+		s.state.mu.RLock()
+		app := s.state.approverSet
+		s.state.mu.RUnlock()
+		if app != nil {
+			return app
+		}
+	}
+	return s.Approvers
+}
+
+func (s Service) activeTG() telegram.Client {
+	if s.state != nil {
+		s.state.mu.RLock()
+		cli := s.state.tgClient
+		tok := s.state.botToken
+		s.state.mu.RUnlock()
+		if tok != "" {
+			return cli
+		}
+	}
+	return s.TG
+}
+
 func (s Service) page(rid string, req protocol.RunRequest, uid uint32) {
 	text := telegram.Card(s.Host, req.Argv, uid, req.Cwd, rid,
 		int64(s.Conf.Timeout), "", s.Conf.DryRun)
-	if s.Conf.Placeholder() {
+	if s.isPlaceholder() {
 		fmt.Printf("[pager:stdout] approve: 2fado approve %s\n%s\n", rid, text)
 		return
 	}
-	if mid, err := s.TG.Send(s.chatID(), text, rid); err == nil {
-		s.Store.AttachPager(rid, s.chatID(), mid)
+	cid := s.activeChatID()
+	tg := s.activeTG()
+	if mid, err := tg.Send(cid, text, rid); err == nil {
+		s.Store.AttachPager(rid, cid, mid)
+	} else {
+		fmt.Printf("[pager:stdout] approve: 2fado approve %s\n%s\n", rid, text)
 	}
 }
 
 func (s Service) closeCard(rid string, req protocol.RunRequest, uid uint32, decision string) {
-	if s.Conf.Placeholder() {
+	if s.isPlaceholder() {
 		return
 	}
 	rec, err := s.Store.Load(rid)
@@ -416,9 +505,185 @@ func (s Service) closeCard(rid string, req protocol.RunRequest, uid uint32, deci
 	if left < 0 {
 		left = 0
 	}
-	s.TG.Edit(rec.ChatID, rec.MsgID, telegram.Card(s.Host, req.Argv,
+	s.activeTG().Edit(rec.ChatID, rec.MsgID, telegram.Card(s.Host, req.Argv,
 		rec.UID, rec.Cwd, rid, left, decision, s.Conf.DryRun),
 		telegram.EmptyButtons())
+}
+
+// StartTelegram begins background polling if bot token is configured.
+func (s Service) StartTelegram(ctx context.Context) {
+	if s.state == nil {
+		return
+	}
+	s.state.mu.Lock()
+	defer s.state.mu.Unlock()
+	if s.state.botToken == "" || strings.HasPrefix(s.state.botToken, "__") {
+		fmt.Println("2fadod: no BOT_TOKEN configured, pager=stdout; verdicts via `2fado approve|deny <id>`")
+		return
+	}
+	pollCtx, cancel := context.WithCancel(ctx)
+	s.state.cancelPoll = cancel
+	go s.state.tgClient.Poll(pollCtx, s.Store.GetOffset(), s.state.approverSet, s.Verdicts, s.Store.SetOffset)
+}
+
+// TelegramInfo returns current configuration status and metadata.
+func (s Service) TelegramInfo() protocol.TelegramInfoResponse {
+	if s.state == nil {
+		return protocol.TelegramInfoResponse{
+			Configured: false,
+			Status:     "unconfigured",
+			Approvers:  []string{},
+		}
+	}
+
+	s.state.mu.Lock()
+	defer s.state.mu.Unlock()
+
+	approvers := s.state.approvers
+	if approvers == nil {
+		approvers = []string{}
+	}
+
+	if s.state.botToken == "" || strings.HasPrefix(s.state.botToken, "__") {
+		return protocol.TelegramInfoResponse{
+			Configured: false,
+			Status:     "unconfigured",
+			ChatID:     s.state.chatID,
+			Approvers:  approvers,
+		}
+	}
+
+	if s.state.tgStatus == "connected" && s.state.botUsername != "" {
+		return protocol.TelegramInfoResponse{
+			Configured:  true,
+			BotUsername: s.state.botUsername,
+			ChatID:      s.state.chatID,
+			Approvers:   approvers,
+			Status:      s.state.tgStatus,
+			Error:       s.state.tgError,
+		}
+	}
+
+	cli := s.state.tgClient
+	if cli.BaseURL == "" && s.TG.BaseURL != "" {
+		cli.BaseURL = s.TG.BaseURL
+	}
+	username, err := cli.GetMe()
+	if err == nil {
+		s.state.botUsername = username
+		s.state.tgStatus = "connected"
+		s.state.tgError = ""
+	} else {
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "dial") || strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "no such host") {
+			s.state.tgStatus = "disconnected"
+		} else {
+			s.state.tgStatus = "error"
+		}
+		s.state.tgError = errMsg
+	}
+
+	return protocol.TelegramInfoResponse{
+		Configured:  true,
+		BotUsername: s.state.botUsername,
+		ChatID:      s.state.chatID,
+		Approvers:   approvers,
+		Status:      s.state.tgStatus,
+		Error:       s.state.tgError,
+	}
+}
+
+// TelegramSetConfig updates and persists Telegram configuration, live-reloading polling.
+func (s Service) TelegramSetConfig(req protocol.TelegramSetConfigRequest) protocol.TelegramSetConfigResponse {
+	if s.state == nil {
+		return protocol.TelegramSetConfigResponse{Success: false, Error: "service uninitialized"}
+	}
+
+	st := s.state
+	var token string
+	if req.BotToken != nil {
+		token = strings.TrimSpace(*req.BotToken)
+	} else {
+		st.mu.RLock()
+		token = st.botToken
+		st.mu.RUnlock()
+	}
+
+	st.mu.RLock()
+	baseClient := st.tgClient
+	st.mu.RUnlock()
+
+	var username string
+	var client telegram.Client
+	if token != "" && !strings.HasPrefix(token, "__") {
+		client = telegram.New(token)
+		if baseClient.BaseURL != "" {
+			client.BaseURL = baseClient.BaseURL
+		} else if s.TG.BaseURL != "" {
+			client.BaseURL = s.TG.BaseURL
+		}
+		var err error
+		username, err = client.GetMe()
+		if err != nil {
+			return protocol.TelegramSetConfigResponse{
+				Success: false,
+				Error:   fmt.Sprintf("invalid bot token: %v", err),
+			}
+		}
+	}
+
+	approvers := req.Approvers
+	if approvers == nil {
+		approvers = []string{}
+	}
+	userCfg := config.UserConfig{
+		BotToken:  token,
+		ChatID:    strings.TrimSpace(req.ChatID),
+		Approvers: approvers,
+	}
+	if err := config.SaveUserConfig(userCfg); err != nil {
+		return protocol.TelegramSetConfigResponse{
+			Success: false,
+			Error:   fmt.Sprintf("failed to save config: %v", err),
+		}
+	}
+
+	s.state.mu.Lock()
+	defer s.state.mu.Unlock()
+
+	if s.state.cancelPoll != nil {
+		s.state.cancelPoll()
+		s.state.cancelPoll = nil
+	}
+
+	s.state.botToken = token
+	s.state.chatID = userCfg.ChatID
+	s.state.approvers = userCfg.Approvers
+	appSet := map[string]bool{}
+	for _, a := range userCfg.Approvers {
+		if a = strings.TrimSpace(a); a != "" {
+			appSet[a] = true
+		}
+	}
+	s.state.approverSet = appSet
+	s.state.tgClient = client
+	s.state.botUsername = username
+
+	if token != "" && !strings.HasPrefix(token, "__") {
+		s.state.tgStatus = "connected"
+		s.state.tgError = ""
+		pollCtx, cancel := context.WithCancel(context.Background())
+		s.state.cancelPoll = cancel
+		go client.Poll(pollCtx, s.Store.GetOffset(), appSet, s.Verdicts, s.Store.SetOffset)
+	} else {
+		s.state.tgStatus = "unconfigured"
+		s.state.tgError = ""
+	}
+
+	return protocol.TelegramSetConfigResponse{
+		Success:     true,
+		BotUsername: username,
+	}
 }
 
 // TelegramPump consumes poll results into the store (atomic: one wins).

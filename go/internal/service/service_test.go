@@ -268,7 +268,7 @@ func TestConfirmLifecycleTimeout(t *testing.T) {
 		Confirm: [][]string{{"/bin/echo", "dangerous"}},
 		Default: "ask",
 	})
-	svc.Conf.Timeout = 1 // 1 second timeout
+	svc.Conf.Timeout = 2 // 2 second timeout to avoid sub-second boundary truncation
 
 	type runOut struct {
 		res protocol.RunResult

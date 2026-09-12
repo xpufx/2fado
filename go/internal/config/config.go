@@ -5,7 +5,9 @@ package config
 
 import (
 	"bufio"
+	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -19,6 +21,55 @@ type Conf struct {
 	Timeout    int
 	DryRun     bool
 	ConfirmAll bool
+}
+
+type UserConfig struct {
+	BotToken  string   `json:"bot_token,omitempty"`
+	ChatID    string   `json:"chat_id,omitempty"`
+	Approvers []string `json:"approvers,omitempty"`
+}
+
+func UserConfigPath() string {
+	if p := os.Getenv("TWOFADO_USER_CONFIG"); p != "" {
+		return p
+	}
+	if p := os.Getenv("FADO_USER_CONFIG"); p != "" {
+		return p
+	}
+	dir, err := os.UserConfigDir()
+	if err != nil || dir == "" {
+		home, _ := os.UserHomeDir()
+		dir = filepath.Join(home, ".config")
+	}
+	return filepath.Join(dir, "2fado", "config.json")
+}
+
+func LoadUserConfig() (UserConfig, error) {
+	p := UserConfigPath()
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return UserConfig{}, err
+	}
+	var cfg UserConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return UserConfig{}, err
+	}
+	return cfg, nil
+}
+
+func SaveUserConfig(cfg UserConfig) error {
+	p := UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(p, data, 0o600); err != nil {
+		return err
+	}
+	return os.Chmod(p, 0o600)
 }
 
 func Load(path string) Conf {
@@ -38,7 +89,13 @@ func Load(path string) Conf {
 		}
 		f.Close()
 	}
+
+	userCfg, _ := LoadUserConfig()
+
 	get := func(k, def string) string {
+		if v, ok := os.LookupEnv("TWOFADO_" + k); ok {
+			return v
+		}
 		if v, ok := os.LookupEnv("FADO_" + k); ok {
 			return v
 		}
@@ -47,18 +104,33 @@ func Load(path string) Conf {
 		}
 		return def
 	}
+
+	botToken := get("BOT_TOKEN", "")
+	if (botToken == "" || strings.HasPrefix(botToken, "__")) && userCfg.BotToken != "" {
+		botToken = userCfg.BotToken
+	}
+
+	chatID := get("CHAT_ID", "")
+	if chatID == "" && userCfg.ChatID != "" {
+		chatID = userCfg.ChatID
+	}
+
 	c := Conf{
-		BotToken: get("BOT_TOKEN", ""),
-		ChatID:   get("CHAT_ID", ""),
+		BotToken: botToken,
+		ChatID:   chatID,
 		Socket:   get("SOCKET", "/tmp/2fado.sock"),
 		StateDir: get("STATE_DIR", "/tmp/2fado-state"),
 		Policy:   get("POLICY", "/etc/2fado/policy.json"),
 		Timeout:  300,
 	}
-	for _, a := range strings.Split(get("APPROVERS", ""), ",") {
-		if a = strings.TrimSpace(a); a != "" {
+	approversStr := get("APPROVERS", "")
+	for _, a := range strings.Split(approversStr, ",") {
+		if a = strings.TrimSpace(a); a != "" && !strings.HasPrefix(a, "__") {
 			c.Approvers = append(c.Approvers, a)
 		}
+	}
+	if len(c.Approvers) == 0 && len(userCfg.Approvers) > 0 {
+		c.Approvers = userCfg.Approvers
 	}
 	c.DryRun = get("DRY_RUN", "") == "true"
 	c.ConfirmAll = get("CONFIRM_ALL", "") == "true"

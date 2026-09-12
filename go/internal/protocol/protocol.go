@@ -26,11 +26,41 @@ type VerdictSubmit struct {
 
 // ClientMessage is the socket envelope: exactly one field is set.
 type ClientMessage struct {
-	Run     *RunRequest    `json:"run,omitempty"`
-	Verdict *VerdictSubmit `json:"verdict,omitempty"`
-	List    *ListRequest   `json:"list,omitempty"`
-	Recent  *RecentRequest `json:"recent,omitempty"`
-	Status  *StatusRequest `json:"status,omitempty"`
+	Run               *RunRequest               `json:"run,omitempty"`
+	Verdict           *VerdictSubmit            `json:"verdict,omitempty"`
+	List              *ListRequest              `json:"list,omitempty"`
+	Recent            *RecentRequest            `json:"recent,omitempty"`
+	Status            *StatusRequest            `json:"status,omitempty"`
+	TelegramInfo      *TelegramInfoRequest      `json:"telegram_info,omitempty"`
+	TelegramSetConfig *TelegramSetConfigRequest `json:"telegram_set_config,omitempty"`
+}
+
+// TelegramInfoRequest asks for Telegram bot configuration status and recipient metadata.
+type TelegramInfoRequest struct{}
+
+// TelegramInfoResponse answers TelegramInfoRequest.
+// Status is one of: "connected" | "disconnected" | "unconfigured" | "error".
+type TelegramInfoResponse struct {
+	Configured  bool     `json:"configured"`
+	BotUsername string   `json:"bot_username,omitempty"`
+	ChatID      string   `json:"chat_id,omitempty"`
+	Approvers   []string `json:"approvers"`
+	Status      string   `json:"status"`
+	Error       string   `json:"error,omitempty"`
+}
+
+// TelegramSetConfigRequest sends updated Telegram bot credentials and recipients.
+type TelegramSetConfigRequest struct {
+	BotToken  *string  `json:"bot_token,omitempty"`
+	ChatID    string   `json:"chat_id,omitempty"`
+	Approvers []string `json:"approvers,omitempty"`
+}
+
+// TelegramSetConfigResponse answers TelegramSetConfigRequest.
+type TelegramSetConfigResponse struct {
+	Success     bool   `json:"success"`
+	BotUsername string `json:"bot_username,omitempty"`
+	Error       string `json:"error,omitempty"`
 }
 
 // StatusRequest asks for the state and outcome of a specific request.

@@ -4,6 +4,7 @@ package telegram
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -56,17 +57,38 @@ type apiUpdates struct {
 }
 
 type Client struct {
-	Token string
-	HTTP  *http.Client
+	Token   string
+	BaseURL string
+	HTTP    *http.Client
 }
 
 func New(token string) Client {
 	return Client{Token: token, HTTP: &http.Client{Timeout: 40 * time.Second}}
 }
 
+func (c Client) baseURL() string {
+	if c.BaseURL != "" {
+		return strings.TrimRight(c.BaseURL, "/")
+	}
+	return "https://api.telegram.org"
+}
+
 func (c Client) call(method string, v url.Values) ([]byte, error) {
-	resp, err := c.HTTP.PostForm(
-		"https://api.telegram.org/bot"+c.Token+"/"+method, v)
+	return c.callContext(context.Background(), method, v)
+}
+
+func (c Client) callContext(ctx context.Context, method string, v url.Values) ([]byte, error) {
+	httpCli := c.HTTP
+	if httpCli == nil {
+		httpCli = &http.Client{Timeout: 40 * time.Second}
+	}
+	urlStr := fmt.Sprintf("%s/bot%s/%s", c.baseURL(), c.Token, method)
+	req, err := http.NewRequestWithContext(ctx, "POST", urlStr, strings.NewReader(v.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := httpCli.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -76,6 +98,46 @@ func (c Client) call(method string, v url.Values) ([]byte, error) {
 		return nil, err
 	}
 	return b.Bytes(), nil
+}
+
+type apiUserResult struct {
+	OK          bool   `json:"ok"`
+	Description string `json:"description,omitempty"`
+	Result      struct {
+		ID        int64  `json:"id"`
+		IsBot     bool   `json:"is_bot"`
+		FirstName string `json:"first_name"`
+		Username  string `json:"username"`
+	} `json:"result"`
+}
+
+// GetMe queries Telegram getMe to validate the bot token and retrieve bot username.
+func (c Client) GetMe() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	return c.GetMeContext(ctx)
+}
+
+// GetMeContext queries getMe with a caller-provided context.
+func (c Client) GetMeContext(ctx context.Context) (string, error) {
+	if c.Token == "" || strings.HasPrefix(c.Token, "__") {
+		return "", fmt.Errorf("token is unconfigured")
+	}
+	body, err := c.callContext(ctx, "getMe", url.Values{})
+	if err != nil {
+		return "", err
+	}
+	var res apiUserResult
+	if err := json.Unmarshal(body, &res); err != nil {
+		return "", fmt.Errorf("invalid response: %w", err)
+	}
+	if !res.OK {
+		if res.Description != "" {
+			return "", fmt.Errorf("telegram api error: %s", res.Description)
+		}
+		return "", fmt.Errorf("telegram api: !ok")
+	}
+	return res.Result.Username, nil
 }
 
 func Who(uid uint32) string {
@@ -180,20 +242,36 @@ type Verdict struct {
 }
 
 // Poll loops getUpdates (outbound long-poll, no open ports) and delivers
-// approved-sender callbacks for request ids.
-func (c Client) Poll(offset int64, approvers map[string]bool, out chan<- Verdict, save func(int64)) {
+// approved-sender callbacks for request ids. Exits when ctx is canceled.
+func (c Client) Poll(ctx context.Context, offset int64, approvers map[string]bool, out chan<- Verdict, save func(int64)) {
 	for {
-		body, err := c.call("getUpdates", url.Values{
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		body, err := c.callContext(ctx, "getUpdates", url.Values{
 			"offset":  {strconv.FormatInt(offset, 10)},
 			"timeout": {"30"},
 		})
 		if err != nil {
-			time.Sleep(5 * time.Second)
+			if ctx.Err() != nil {
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+			}
 			continue
 		}
 		var up apiUpdates
 		if err := json.Unmarshal(body, &up); err != nil {
-			time.Sleep(5 * time.Second)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+			}
 			continue
 		}
 		for _, u := range up.Result {
@@ -207,7 +285,11 @@ func (c Client) Poll(offset int64, approvers map[string]bool, out chan<- Verdict
 			if !approvers[by] {
 				continue
 			}
-			out <- Verdict{RID: rid, Decision: kind, By: by}
+			select {
+			case out <- Verdict{RID: rid, Decision: kind, By: by}:
+			case <-ctx.Done():
+				return
+			}
 			if kind == "approve" {
 				c.answer(u.Callback.ID, "approved — executing")
 			} else {
