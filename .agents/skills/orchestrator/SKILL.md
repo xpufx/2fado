@@ -16,7 +16,7 @@ Unlike the `coding-agent` skill (which governs single-issue code modification in
 1. **Clean Handoffs**: Never present incomplete, uncommitted, or unversioned work to the human user for review.
 2. **Deterministic Pre-Flight**: Before requesting human testing or signoff, query agents and working trees to catch pending administrative prerequisites (version increments, unpushed commits, unbuilt bundles, daemon restarts).
 3. **Explicit Boundary of Responsibility**: Every proposal to the user must explicitly distinguish between **Agent Autonomous Actions** and **Operator Actions** (actions requiring human intervention, credentials, 2FA, or physical device testing).
-4. **Gated Fan-Out**: No worker agent begins deployment or irreversible operations until the human operator explicitly approves, denies, or adjusts the plan.
+4. **Autonomous Dispatch & Orchestration**: Once a specification is approved (`spec/2-approved`), the Orchestrator has full autonomous authority to schedule, assign, and dispatch worker agents across the fleet without asking for human operator permission. Human gates apply strictly to raw issue checklist approvals (`spec/1-checklist` -> `spec/2-approved`), irreversible external actions (e.g. `npm publish` / 2FA), and final device signoff (`state/verify`).
 
 ---
 
@@ -78,17 +78,20 @@ When presenting deliverables to the operator (`@oktay`), the Orchestrator **MUST
 
 ---
 
-## 4. Gated Fan-Out Protocol
+## 4. Deliverable Handoff & Signoff Protocol
 
-Once the structured proposal is presented:
-1. **Wait for Human Feedback**: The Orchestrator halts execution until the human approves, rejects, or amends the task breakdown.
+> [!NOTE]
+> **Autonomous Dispatch**: The Orchestrator does **NOT** need operator approval to assign or dispatch tasks on already-approved tickets (`spec/2-approved`). Task dispatch and fleet coordination are fully autonomous. This handoff protocol applies only when work is complete and ready for human device verification or irreversible external release (e.g. `npm publish`).
+
+Once the deliverable pre-flight is complete and presented to the operator:
+1. **Await Human Review**: The operator tests the deliverable (`state/verify`) or provides feedback.
 2. **If Denied / Changes Requested**:
-   - Ingest user steering.
+   - Ingest operator steering.
    - Dispatch corrective directives back to the assigned minion.
-   - Return to Step 1.
-3. **If Approved**:
-   - **Phase A (Agent Execution)**: Fan out autonomous tasks to worker agents or execute local commands (commits, tags, pushes, daemon restarts).
-   - **Phase B (User Handoff)**: Once Phase A is 100% green, formally prompt the user to complete their portion (device testing, 2FA prompt, issue closure).
+   - Re-verify and update ticket.
+3. **If Approved / Signed Off**:
+   - **Phase A (Final Automation)**: Execute remaining autonomous tasks (tags, pushes, daemon restarts).
+   - **Phase B (User Action / Closeout)**: Operator completes physical device checks, 2FA prompts, and closes the issue on Forgejo.
 
 ---
 
