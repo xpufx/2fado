@@ -25,6 +25,7 @@ function socketCandidates(configured?: string): string[] {
     }
   };
   push(configured);
+  push(process.env.TWOFADO_SOCKET);
   push(process.env.FADO_SOCKET);
   push(DEFAULT_SOCKET);
   return candidates;

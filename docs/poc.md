@@ -7,8 +7,8 @@ commands execute as you.
 
 ```sh
 make build
-export FADO_SOCKET=/tmp/2fado.sock FADO_STATE_DIR=/tmp/2fado-state
-export FADO_CONF=$PWD/etc/2fado.conf.example   # placeholders intact
+export TWOFADO_SOCKET=/tmp/2fado.sock TWOFADO_STATE_DIR=/tmp/2fado-state
+export TWOFADO_CONF=$PWD/etc/2fado.conf.example   # placeholders intact (legacy FADO_* supported)
 ./bin/2fado daemon &                             # pager=stdout, verdicts local
 ./bin/2fado run -- htop                          # terminal 1: waits
 ./bin/2fado approve <request-id>                 # terminal 2: the "OOB thing"

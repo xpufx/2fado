@@ -21,6 +21,7 @@ type Conf struct {
 	Timeout    int
 	DryRun     bool
 	ConfirmAll bool
+	Pager      string
 }
 
 type UserConfig struct {
@@ -29,11 +30,22 @@ type UserConfig struct {
 	Approvers []string `json:"approvers,omitempty"`
 }
 
-func UserConfigPath() string {
-	if p := os.Getenv("TWOFADO_USER_CONFIG"); p != "" {
-		return p
+// GetEnvWithFallback returns the value of the first non-empty environment variable
+// among preferred and fallbacks (in order), or empty string if none are set.
+func GetEnvWithFallback(preferred string, fallbacks ...string) string {
+	if v := os.Getenv(preferred); v != "" {
+		return v
 	}
-	if p := os.Getenv("FADO_USER_CONFIG"); p != "" {
+	for _, fb := range fallbacks {
+		if v := os.Getenv(fb); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func UserConfigPath() string {
+	if p := GetEnvWithFallback("TWOFADO_USER_CONFIG", "FADO_USER_CONFIG"); p != "" {
 		return p
 	}
 	dir, err := os.UserConfigDir()
@@ -92,11 +104,9 @@ func Load(path string) Conf {
 
 	userCfg, _ := LoadUserConfig()
 
-	get := func(k, def string) string {
-		if v, ok := os.LookupEnv("TWOFADO_" + k); ok {
-			return v
-		}
-		if v, ok := os.LookupEnv("FADO_" + k); ok {
+	get := func(k string, def string, extraFallbacks ...string) string {
+		fallbacks := append([]string{"FADO_" + k}, extraFallbacks...)
+		if v := GetEnvWithFallback("TWOFADO_"+k, fallbacks...); v != "" {
 			return v
 		}
 		if v, ok := kv[k]; ok {
@@ -105,12 +115,12 @@ func Load(path string) Conf {
 		return def
 	}
 
-	botToken := get("BOT_TOKEN", "")
+	botToken := get("BOT_TOKEN", "", "BOT_TOKEN")
 	if (botToken == "" || strings.HasPrefix(botToken, "__")) && userCfg.BotToken != "" {
 		botToken = userCfg.BotToken
 	}
 
-	chatID := get("CHAT_ID", "")
+	chatID := get("CHAT_ID", "", "CHAT_ID")
 	if chatID == "" && userCfg.ChatID != "" {
 		chatID = userCfg.ChatID
 	}
@@ -122,8 +132,9 @@ func Load(path string) Conf {
 		StateDir: get("STATE_DIR", "/tmp/2fado-state"),
 		Policy:   get("POLICY", "/etc/2fado/policy.json"),
 		Timeout:  300,
+		Pager:    get("PAGER", ""),
 	}
-	approversStr := get("APPROVERS", "")
+	approversStr := get("APPROVERS", "", "APPROVERS")
 	for _, a := range strings.Split(approversStr, ",") {
 		if a = strings.TrimSpace(a); a != "" && !strings.HasPrefix(a, "__") {
 			c.Approvers = append(c.Approvers, a)
@@ -155,5 +166,5 @@ func (c Conf) ApproverSet() map[string]bool {
 }
 
 func (c Conf) Placeholder() bool {
-	return c.BotToken == "" || strings.HasPrefix(c.BotToken, "__")
+	return c.Pager == "stdout" || c.BotToken == "" || strings.HasPrefix(c.BotToken, "__")
 }

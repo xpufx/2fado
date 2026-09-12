@@ -1,5 +1,5 @@
 # Copy to /etc/2fado/2fado.conf and fill in the placeholders.
-# Dev override: export FADO_CONF, FADO_SOCKET, FADO_STATE_DIR.
+# Dev override: export TWOFADO_CONF, TWOFADO_SOCKET, TWOFADO_STATE_DIR (legacy FADO_* also supported).
 
 # Telegram bot token from @BotFather.
 BOT_TOKEN=__TELEGRAM_BOT_TOKEN__

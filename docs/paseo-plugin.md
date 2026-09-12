@@ -52,8 +52,8 @@ verdict = defineContract({
 ## Server behavior (daemon subprocess, trusted)
 
 - Owns the socket to `2fadod` (per-call `socketPath` from the app,
-  then `FADO_SOCKET` env, then `/run/2fado.sock`, then
-  `/tmp/2fado-live.sock`). Polls `list` and fans out: toast per new id.
+  then `TWOFADO_SOCKET` env, then `FADO_SOCKET` env, then `/run/2fado.sock`, then
+  `/tmp/2fado.sock`). Polls `list` and fans out: toast per new id.
   Socket calls are wrapped in `guardRpcHandler` (5s timeout, max 4
   inflight, fail-fast) with structured `createPluginLogger` logging.
 - Verdict handler submits `{id, decision, by: "paseo"}` over the `2fadod`

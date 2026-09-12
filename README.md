@@ -41,7 +41,7 @@ make build
 ./bin/2fado run -- /bin/echo hi                 # terminal 1: waits
 ./bin/2fado approve <request-id>                # terminal 2: the human
 ```
-(FADO_SOCKET/FADO_STATE_DIR/FADO_CONF env as in docs/poc.md.)
+(TWOFADO_SOCKET/TWOFADO_STATE_DIR/TWOFADO_CONF env as in docs/poc.md; legacy FADO_* also supported.)
 
 Paste a bot token + your Telegram id into the config and terminal 2
 becomes your phone (outbound long-poll, no open ports).

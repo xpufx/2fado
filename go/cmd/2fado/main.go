@@ -25,13 +25,13 @@ func main() {
 	if len(os.Args) < 2 {
 		os.Exit(usage())
 	}
-	sock := os.Getenv("FADO_SOCKET")
+	sock := config.GetEnvWithFallback("TWOFADO_SOCKET", "FADO_SOCKET")
 	if sock == "" {
 		sock = "/tmp/2fado.sock"
 	}
 	switch os.Args[1] {
 	case "daemon":
-		confPath := os.Getenv("FADO_CONF")
+		confPath := config.GetEnvWithFallback("TWOFADO_CONF", "FADO_CONF", "2FADO_CONF")
 		if confPath == "" {
 			confPath = "/etc/2fado/2fado.conf"
 		}
