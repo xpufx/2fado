@@ -57,11 +57,11 @@ function useNewPendingToast(
     }
     const hasConfirm = fresh.some((item) => item.step === "confirm");
     if (hasConfirm) {
-      toast.show("⚠️ Are you sure? 2fado confirmation required", { variant: "warning" });
+      toast.show("⚠️ Are you sure? 2fado confirmation required", { variant: "warning", durationMs: 15_000 });
     } else {
       toast.show(
         fresh.length === 1 ? "2fado approval needed" : `${fresh.length} 2fado approvals needed`,
-        { variant: "warning" },
+        { variant: "warning", durationMs: 10_000 },
       );
     }
   }, [items, toast]);
