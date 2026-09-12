@@ -49,6 +49,13 @@ The Orchestrator inspects the affected repositories/worktrees:
 - **Build / Bundle Output**: Ensure build artifacts (`dist/`) are fresh and match source code.
 - **Daemon / Service Reloads**: Determine if running Paseo daemons or background systemd units need a restart or reload to pick up changes.
 
+### Step 2.5: Live Runtime Environment Synchronization (`make ready`)
+Never ask the operator to test without proving runtime provenance:
+- **Execute Sync**: Run `make ready` (or project equivalent) to recompile the binary, restart the daemon, and reload the Paseo plugin.
+- **Dual-Side Hashes & PID**: Verify the live daemon PID, daemon binary SHA-256 hash, and plugin source tree hash.
+- **Socket Healthcheck**: Confirm the live socket responds with the newly compiled binary hash matching `HEAD`.
+- **Zero Ambiguity**: Include the runtime provenance card in the review handoff so the operator knows 100% that the live environment is running the latest code.
+
 ---
 
 ## 3. Human Approval Presentation Standard
