@@ -8,6 +8,7 @@ import {
   approvalTelegramInfo,
   approvalTelegramSetConfig,
   pendingList,
+  policyAddRule,
   recentList,
   verdict,
 } from "../shared/approval";
@@ -369,4 +370,50 @@ export const setTelegramConfig = guardRpcHandler(telegramSetConfigInner, {
   maxInflight: 4,
   onTimeout: (info) => log.warn("telegram set config timed out", info),
   onSaturated: (info) => log.warn("telegram set config saturated, shedding load", info),
+});
+
+export class FadoClient {
+  constructor(private socketPath?: string) {}
+
+  async policyAddRule(
+    params: RpcInput<typeof policyAddRule>,
+  ): Promise<RpcOutput<typeof policyAddRule>> {
+    return policyAddRuleInner({ ...params, socketPath: params?.socketPath ?? this.socketPath });
+  }
+}
+
+interface DaemonPolicyAddRuleResponse {
+  success?: boolean;
+  error?: string;
+  rules_count?: number;
+}
+
+async function policyAddRuleInner(
+  input?: RpcInput<typeof policyAddRule>,
+): Promise<RpcOutput<typeof policyAddRule>> {
+  if (!input || input.pattern.length === 0) return { success: false, error: "empty pattern" };
+  try {
+    const raw = (await callDaemon(
+      {
+        policy_add_rule: {
+          target: input.target,
+          match_type: input.match_type,
+          pattern: input.pattern,
+        },
+      },
+      input.socketPath,
+    )) as DaemonPolicyAddRuleResponse;
+    if (raw?.success === true) return { success: true, rules_count: raw.rules_count };
+    return { success: false, error: raw?.error ?? "daemon rejected rule" };
+  } catch (err) {
+    log.warn("policy add rule failed", { error: err });
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export const addPolicyRule = guardRpcHandler(policyAddRuleInner, {
+  timeoutMs: 5000,
+  maxInflight: 4,
+  onTimeout: (info) => log.warn("policy add rule timed out", info),
+  onSaturated: (info) => log.warn("policy add rule saturated, shedding load", info),
 });

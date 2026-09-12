@@ -6,10 +6,12 @@ import {
   approvalTelegramInfo,
   approvalTelegramSetConfig,
   pendingList,
+  policyAddRule,
   recentList,
   verdict,
 } from "./shared/approval";
 import {
+  addPolicyRule,
   getStatus,
   getTelegramInfo,
   listPending,
@@ -50,5 +52,6 @@ export default function contribute(server: PluginServerContext) {
   server.handle(approvalStatus, (input) => getStatus(input));
   server.handle(approvalTelegramInfo, (input) => getTelegramInfo(input));
   server.handle(approvalTelegramSetConfig, (input) => setTelegramConfig(input));
+  server.handle(policyAddRule, (input) => addPolicyRule(input));
   return () => {};
 }

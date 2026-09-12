@@ -128,6 +128,38 @@ export const approvalTelegramSetConfig = defineContract({
   description: "Send updated Telegram recipient credentials to 2fadod",
 });
 
+export interface PolicyAddRuleParams {
+  target: "whitelist" | "blacklist";
+  match_type: "exact" | "base" | "custom";
+  pattern: string[];
+  socketPath?: string;
+}
+export interface PolicyAddRuleResult {
+  success: boolean;
+  error?: string;
+  rules_count?: number;
+}
+
+export const policyAddRule = defineContract({
+  name: "approval.policyAddRule",
+  input: z.object({
+    target: z.enum(["whitelist", "blacklist"]),
+    match_type: z.enum(["exact", "base", "custom"]),
+    pattern: z.array(z.string()),
+    socketPath: z.string().min(1).optional(),
+  }),
+  output: z.object({
+    success: z.boolean(),
+    error: z.string().optional(),
+    rules_count: z.number().optional(),
+  }),
+  description: "Persist a policy rule derived from an approval item",
+});
+
+export type ApprovalApi = {
+  policyAddRule(params: PolicyAddRuleParams): Promise<PolicyAddRuleResult>;
+};
+
 const settingsSchema = z.object({
   socketPath: z
     .string()

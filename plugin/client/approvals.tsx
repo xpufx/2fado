@@ -19,12 +19,13 @@ import {
 } from "paseo-plugin-helper/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { Platform, Pressable, Text, View } from "react-native";
+import { Platform, Pressable, Text, TextInput, View } from "react-native";
 import {
   approvalSettings,
   approvalStatus,
   approvalTelegramInfo,
   pendingList,
+  policyAddRule,
   recentList,
   verdict,
 } from "../shared/approval";
@@ -245,6 +246,7 @@ function ApprovalItem({
   item,
   deciding,
   onDecide,
+  onAlways,
 }: {
   item: {
     id: string;
@@ -266,6 +268,7 @@ function ApprovalItem({
   };
   deciding?: "approve" | "deny";
   onDecide(item: { id: string; argv: string[]; cwd: string }, decision: "approve" | "deny"): void;
+  onAlways(item: { id: string; argv: string[]; cwd: string; preview?: { resolvedBinary?: string } }, target: "whitelist" | "blacklist"): void;
 }) {
   const { colors } = usePluginTheme();
   const [program] = item.argv;
@@ -475,6 +478,30 @@ function ApprovalItem({
             loading={deciding === "deny"}
             disabled={isDeciding}
             onPress={() => onDecide(item, "deny")}
+          />
+        </View>
+      </View>
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        <View style={{ flex: 1 }}>
+          <Button
+            label="Always approve…"
+            variant="secondary"
+            size="sm"
+            icon="Check"
+            accessibilityLabel={`Always approve ${item.id}`}
+            disabled={isDeciding}
+            onPress={() => onAlways(item, "whitelist")}
+          />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Button
+            label="Always deny…"
+            variant="secondary"
+            size="sm"
+            icon="X"
+            accessibilityLabel={`Always deny ${item.id}`}
+            disabled={isDeciding}
+            onPress={() => onAlways(item, "blacklist")}
           />
         </View>
       </View>
@@ -747,6 +774,7 @@ export function ApprovalSurface({
   const socketPath = useSocketPath();
   const decide = useRpc(verdict);
   const getStatus = useRpc(approvalStatus);
+  const addRule = useRpc(policyAddRule);
   const queryClient = useQueryClient();
   const isMountedRef = useRef(true);
 
@@ -758,6 +786,13 @@ export function ApprovalSurface({
   }, []);
 
   const [decidingMap, setDecidingMap] = useState<Record<string, "approve" | "deny">>({});
+  const [policyDialog, setPolicyDialog] = useState<{
+    item: { id: string; argv: string[]; cwd: string; preview?: { resolvedBinary?: string } };
+    target: "whitelist" | "blacklist";
+  } | null>(null);
+  const [policyScope, setPolicyScope] = useState<"exact" | "base" | "custom">("exact");
+  const [customPattern, setCustomPattern] = useState("");
+  const [policySaving, setPolicySaving] = useState(false);
   const [activeExecutions, setActiveExecutions] = useState<
     Record<
       string,
@@ -943,6 +978,59 @@ export function ApprovalSurface({
   const recentItems = recent.data?.items ?? [];
   const activeList = Object.values(activeExecutions);
 
+  const openPolicyDialog = (
+    item: { id: string; argv: string[]; cwd: string; preview?: { resolvedBinary?: string } },
+    target: "whitelist" | "blacklist",
+  ) => {
+    setPolicyScope("exact");
+    setCustomPattern(item.argv.join(" "));
+    setPolicyDialog({ item, target });
+  };
+
+  const submitPolicyRule = async () => {
+    if (!policyDialog || policySaving) return;
+    const { item, target } = policyDialog;
+    const base = item.preview?.resolvedBinary || item.argv[0] || "";
+    const pattern =
+      policyScope === "exact"
+        ? item.argv
+        : policyScope === "base"
+          ? [base]
+          : customPattern.split(/\s+/).filter(Boolean);
+    if (pattern.length === 0) {
+      toast.error("Pattern must not be empty.");
+      return;
+    }
+    setPolicySaving(true);
+    try {
+      const res = await addRule({
+        target,
+        match_type: policyScope,
+        pattern,
+        socketPath,
+      });
+      if (!res.success) {
+        toast.error(`Rule save failed: ${res.error ?? "unknown error"}`);
+        return;
+      }
+      toast.show(
+        `Rule saved (${res.rules_count ?? "?"} total) — ${target === "whitelist" ? "approving" : "denying"}`,
+        { variant: "success" },
+      );
+      setPolicyDialog(null);
+      await handleDecide(item, target === "whitelist" ? "approve" : "deny");
+    } catch {
+      toast.error("Rule save failed — 2fadod unreachable.");
+    } finally {
+      if (isMountedRef.current) setPolicySaving(false);
+    }
+  };
+
+  const policyBase = policyDialog
+    ? policyDialog.item.preview?.resolvedBinary || policyDialog.item.argv[0] || ""
+    : "";
+  const policyExact = policyDialog ? policyDialog.item.argv.join(" ") : "";
+
   return (
     <PluginThemeProvider theme={{ colors: theme.colors }} layout={layout}>
       <ScrollView
@@ -1030,8 +1118,90 @@ export function ApprovalSurface({
               item={item}
               deciding={decidingMap[item.id]}
               onDecide={(target, decision) => handleDecide(target, decision)}
+              onAlways={(target, decision) => openPolicyDialog(target, decision)}
             />
           ))}
+          {policyDialog ? (
+            <Card
+              style={{
+                borderLeftWidth: 3,
+                borderLeftColor: theme.colors.accent,
+                gap: 8,
+                padding: 12,
+              }}
+            >
+              <Text style={{ color: theme.colors.foreground, fontSize: 13, fontWeight: "700" }}>
+                {policyDialog.target === "whitelist" ? "Always approve" : "Always deny"} — pick scope
+              </Text>
+              {(["exact", "base", "custom"] as const).map((scope) => (
+                <Pressable
+                  key={scope}
+                  accessibilityRole="button"
+                  onPress={() => setPolicyScope(scope)}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 }}
+                >
+                  <View
+                    style={{
+                      width: 14,
+                      height: 14,
+                      borderRadius: 7,
+                      borderWidth: 2,
+                      borderColor: theme.colors.accent,
+                      backgroundColor:
+                        policyScope === scope ? theme.colors.accent : "transparent",
+                    }}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: theme.colors.foreground, fontSize: 12, fontWeight: "600" }}>
+                      {scope === "exact" ? "Exact match" : scope === "base" ? "Base binary" : "Custom pattern"}
+                    </Text>
+                    <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
+                      {scope === "exact" ? policyExact : scope === "base" ? policyBase : "Edit arguments below"}
+                    </Text>
+                  </View>
+                </Pressable>
+              ))}
+              {policyScope === "custom" ? (
+                <TextInput
+                  value={customPattern}
+                  onChangeText={setCustomPattern}
+                  placeholder="command arguments"
+                  placeholderTextColor={theme.colors.foregroundMuted}
+                  style={{
+                    color: theme.colors.foreground,
+                    borderColor: theme.colors.border,
+                    borderWidth: 1,
+                    borderRadius: 6,
+                    paddingHorizontal: 8,
+                    paddingVertical: 6,
+                    fontSize: 12,
+                  }}
+                />
+              ) : null}
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <View style={{ flex: 1 }}>
+                  <Button
+                    label="Cancel"
+                    variant="secondary"
+                    size="sm"
+                    onPress={() => setPolicyDialog(null)}
+                    disabled={policySaving}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Button
+                    label={policyDialog.target === "whitelist" ? "Save & approve" : "Save & deny"}
+                    variant="primary"
+                    size="sm"
+                    icon="Check"
+                    onPress={() => void submitPolicyRule()}
+                    loading={policySaving}
+                    disabled={policySaving}
+                  />
+                </View>
+              </View>
+            </Card>
+          ) : null}
 
           {activeList.length > 0 ? (
             <>
