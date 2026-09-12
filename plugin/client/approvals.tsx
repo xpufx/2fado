@@ -145,7 +145,7 @@ export function ApprovalHeaderIcon(props: PluginButtonIconProps) {
     <PluginThemeProvider theme={{ colors: theme.colors }}>
       <AttentionBeacon
         active={count > 0}
-        mode="bounce"
+        mode="glow"
         tone={hasConfirm ? "danger" : "warning"}
         style={{ overflow: "visible" }}
       >
