@@ -476,3 +476,72 @@ func TestPolicyAddRuleLiveReload(t *testing.T) {
 		t.Error("bad target must fail")
 	}
 }
+
+func TestAdoptOrphansExecutesOnApproval(t *testing.T) {
+	svc := testService(t, policy.Policy{Default: "ask"})
+	svc.Conf.Timeout = 10
+	svc.Conf.DryRun = false
+
+	rid := "orphan-adopt-1"
+	rec := protocol.PendingRecord{
+		Argv:    []string{"/bin/echo", "adopted"},
+		UID:     1000,
+		Cwd:     t.TempDir(),
+		Expires: time.Now().Add(8 * time.Second).Unix(),
+		Step:    "initial",
+	}
+	if err := svc.Store.Save(rec, rid); err != nil {
+		t.Fatal(err)
+	}
+
+	svc.AdoptOrphans()
+
+	if !svc.Store.Consume(rid, "approve", "operator") {
+		t.Fatal("failed to consume orphan approval")
+	}
+
+	deadline := time.Now().Add(6 * time.Second)
+	for {
+		st := svc.Store.Status(rid, time.Now().Unix())
+		if st.Status == "completed" || st.Status == "running" {
+			break
+		}
+		done := false
+		for _, it := range svc.Store.Recent(10) {
+			if it.ID == rid && it.Exit == 0 {
+				done = true
+				break
+			}
+		}
+		if done {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("orphan petition not executed after approval, status=%+v", st)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func TestAdoptOrphansSkipsExpired(t *testing.T) {
+	svc := testService(t, policy.Policy{Default: "ask"})
+
+	rid := "orphan-expired-1"
+	rec := protocol.PendingRecord{
+		Argv:    []string{"/bin/echo", "stale"},
+		UID:     1000,
+		Cwd:     t.TempDir(),
+		Expires: time.Now().Add(-1 * time.Second).Unix(),
+		Step:    "initial",
+	}
+	if err := svc.Store.Save(rec, rid); err != nil {
+		t.Fatal(err)
+	}
+
+	svc.AdoptOrphans()
+	time.Sleep(300 * time.Millisecond)
+
+	if items := svc.Store.List(time.Now().Unix()); len(items) != 0 {
+		t.Fatalf("expired orphan still listed: %+v", items)
+	}
+}

@@ -205,6 +205,10 @@ func (s Service) RunWithCancel(req protocol.RunRequest, uid uint32, cancel <-cha
 		Preview: preview,
 	}, rid)
 	s.page(rid, req, uid)
+	if req.Detach {
+		go s.runDetached(rid, req, uid, clean, expires)
+		return protocol.RunResult{Status: "pending", ID: rid}
+	}
 	v := s.await(rid, expires, cancel)
 	decision := "timeout"
 	by := ""
@@ -236,6 +240,31 @@ func (s Service) RunWithCancel(req protocol.RunRequest, uid uint32, cancel <-cha
 
 func (s Service) needsConfirm(argv []string) bool {
 	return s.Conf.ConfirmAll || s.Policy.NeedsConfirm(argv)
+}
+
+// runDetached awaits the verdict in the background for fire-and-forget
+// requests, then executes or records the outcome in the store.
+func (s Service) runDetached(rid string, req protocol.RunRequest, uid uint32, clean map[string]string, expires time.Time) {
+	v := s.await(rid, expires, nil)
+	decision := "timeout"
+	by := ""
+	if v != nil {
+		decision = v.Decision
+		by = v.By
+	}
+	s.Store.Append(protocol.AuditEvent{Ev: "verdict", Argv: req.Argv,
+		RID: rid, Step: "initial", Decision: decision, By: by})
+	if decision != "approve" {
+		s.closeCard(rid, req, uid, decision)
+		s.Store.SaveResult(rid, -1, "")
+		return
+	}
+	if s.needsConfirm(req.Argv) {
+		s.confirm(rid, req, uid, clean, by, nil)
+		return
+	}
+	s.closeCard(rid, req, uid, decision)
+	s.runApproved(rid, req, uid, clean)
 }
 
 // confirm chains a second ask onto an approved request: a fresh record
@@ -338,6 +367,55 @@ func (s Service) runApproved(rid string, req protocol.RunRequest, uid uint32, cl
 		RID: rid, AsUID: asUID, Exit: code, Dry: s.Conf.DryRun})
 	s.Store.SaveResult(rid, code, out)
 	return protocol.RunResult{Status: "allowed", Exit: code, Output: out}
+}
+
+// AdoptOrphans re-attaches waiters to petitions persisted on disk that lost
+// their in-memory goroutine across a daemon restart. Expired records get a
+// timeout result; live ones get a background waiter driving them to completion.
+func (s Service) AdoptOrphans() {
+	now := time.Now().Unix()
+	for _, item := range s.Store.List(now) {
+		rid := item.ID
+		rec, err := s.Store.Load(rid)
+		if err != nil {
+			continue
+		}
+		if s.Store.Verdict(rid) != nil {
+			continue
+		}
+		if rec.Expires <= now {
+			req := protocol.RunRequest{Argv: rec.Argv, Cwd: rec.Cwd, Env: map[string]string{}}
+			s.closeCard(rid, req, rec.UID, "timeout")
+			s.Store.SaveResult(rid, -1, "timeout")
+			continue
+		}
+		go s.adoptOne(rid, rec)
+	}
+}
+
+func (s Service) adoptOne(rid string, rec protocol.PendingRecord) {
+	req := protocol.RunRequest{Argv: rec.Argv, Cwd: rec.Cwd, Env: map[string]string{}}
+	v := s.await(rid, time.Unix(rec.Expires, 0), nil)
+	decision := "timeout"
+	by := "system"
+	if v != nil {
+		decision = v.Decision
+		by = v.By
+	}
+	s.Store.Append(protocol.AuditEvent{Ev: "verdict", Argv: rec.Argv,
+		RID: rid, Step: rec.Step, Decision: decision, By: by})
+	if decision != "approve" {
+		s.closeCard(rid, req, rec.UID, decision)
+		s.Store.SaveResult(rid, -1, "")
+		return
+	}
+	clean, _ := s.ScrubEnv(req.Env)
+	if rec.Step != "confirm" && s.needsConfirm(req.Argv) {
+		s.confirm(rid, req, rec.UID, clean, by, nil)
+		return
+	}
+	s.closeCard(rid, req, rec.UID, decision)
+	s.runApproved(rid, req, rec.UID, clean)
 }
 
 // List answers the plugin server's poll: pending, unexpired, undecided.

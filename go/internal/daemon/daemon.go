@@ -94,6 +94,7 @@ func Serve(svc service.Service) error {
 	defer cancel()
 	svc.StartTelegram(ctx)
 	go svc.TelegramPump()
+	go svc.AdoptOrphans()
 	fmt.Printf("2fadod listening on %s (state %s)\n", svc.Conf.Socket, svc.Conf.StateDir)
 	for {
 		c, err := l.Accept()
