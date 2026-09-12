@@ -26,13 +26,13 @@ export default function contribute(client: PluginClientContext) {
   client.addSurface("approvals", Surface);
   client.addSidebarItem({
     id: "approvals",
-    title: "2fado approvals",
+    title: "2fado",
     icon: "ShieldCheck",
     surface: "approvals",
   });
   client.addCommandCenterItem({
     id: "open-approvals",
-    title: "Open 2fado approvals",
+    title: "Open 2fado",
     icon: "ShieldCheck",
     context: "global",
     onSelect({ openSurface }) {
@@ -79,7 +79,7 @@ export default function contribute(client: PluginClientContext) {
       id: "twofado",
       workspaceId,
       button: {
-        title: "2fado approvals",
+        title: "2fado",
         icon: ApprovalHeaderIcon,
         behavior: { kind: "action", onPress: () => client.openSurface("approvals") },
       },

@@ -6,6 +6,7 @@ import type {
 } from "@getpaseo/plugin/client";
 import { Icon, ScrollView, useToast } from "@getpaseo/plugin/client/react-native";
 import {
+  AttentionBeacon,
   Badge,
   Button,
   Card,
@@ -125,6 +126,7 @@ export function ApprovalHeaderIcon(props: PluginButtonIconProps) {
   const color = props.color;
   const { data } = usePendingList();
   const count = data?.items.length ?? 0;
+  const hasConfirm = data?.items.some((item) => item.step === "confirm") ?? false;
 
   useNewPendingToast(data?.items);
 
@@ -134,10 +136,15 @@ export function ApprovalHeaderIcon(props: PluginButtonIconProps) {
       ?.update({ label: count > 0 ? `${count} pending` : undefined });
   }, [workspaceId, count]);
 
-  if (count === 0) return <Icon name="ShieldCheck" size={size} color={color} />;
   return (
     <PluginThemeProvider theme={{ colors: theme.colors }}>
-      <Badge label={String(count)} variant="warning" icon="ShieldCheck" />
+      <AttentionBeacon
+        active={count > 0}
+        mode="badge"
+        tone={hasConfirm ? "danger" : "warning"}
+      >
+        <Icon name="ShieldCheck" size={size} color={color} />
+      </AttentionBeacon>
     </PluginThemeProvider>
   );
 }
