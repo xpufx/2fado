@@ -37,6 +37,7 @@ func TestDaemonTelegramSocketEndpoints(t *testing.T) {
 		Socket:   sockPath,
 		StateDir: tmpDir,
 		Timeout:  5,
+		Policy:   filepath.Join(tmpDir, "policy.json"),
 	}
 	svc := service.New(cfg)
 	svc.TG.BaseURL = ts.URL
@@ -132,6 +133,24 @@ func TestDaemonTelegramSocketEndpoints(t *testing.T) {
 		t.Errorf("unexpected Approvers: %+v", infoAfterRes.Approvers)
 	}
 
-	// 4. Clean up: unconfigure to terminate background poll loop
+	// 4. policy_add_rule over socket: exact whitelist then verify enforcement
+	addBytes := sendAndRecv(`{"policy_add_rule":{"target":"whitelist","match_type":"exact","pattern":["/bin/true"]}}`)
+	var addRes protocol.PolicyAddRuleResponse
+	if err := json.Unmarshal(addBytes, &addRes); err != nil {
+		t.Fatalf("unmarshal policy_add_rule failed: %v", err)
+	}
+	if !addRes.Success {
+		t.Fatalf("policy_add_rule failed: %s", addRes.Error)
+	}
+	badBytes := sendAndRecv(`{"policy_add_rule":{"target":"nope","match_type":"exact","pattern":["/bin/x"]}}`)
+	var badRes protocol.PolicyAddRuleResponse
+	if err := json.Unmarshal(badBytes, &badRes); err != nil {
+		t.Fatalf("unmarshal bad policy_add_rule failed: %v", err)
+	}
+	if badRes.Success {
+		t.Error("bad target must fail")
+	}
+
+	// 5. Clean up: unconfigure to terminate background poll loop
 	_ = sendAndRecv(`{"telegram_set_config":{"bot_token":""}}`)
 }

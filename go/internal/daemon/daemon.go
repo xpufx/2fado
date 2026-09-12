@@ -57,11 +57,11 @@ func Serve(svc service.Service) error {
 		if err != nil {
 			continue
 		}
-		go handle(svc, c)
+		go handle(&svc, c)
 	}
 }
 
-func handle(svc service.Service, c net.Conn) {
+func handle(svc *service.Service, c net.Conn) {
 	defer c.Close()
 	line, err := bufio.NewReader(c).ReadBytes('\n')
 	if err != nil {
@@ -96,6 +96,8 @@ func handle(svc service.Service, c net.Conn) {
 		out, _ = json.Marshal(svc.TelegramInfo())
 	case msg.TelegramSetConfig != nil:
 		out, _ = json.Marshal(svc.TelegramSetConfig(*msg.TelegramSetConfig))
+	case msg.PolicyAddRule != nil:
+		out, _ = json.Marshal(svc.PolicyAddRule(*msg.PolicyAddRule))
 	default:
 		return
 	}

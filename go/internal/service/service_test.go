@@ -1,6 +1,8 @@
 package service
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -419,5 +421,58 @@ func TestConfirmLifecycleClientAborted(t *testing.T) {
 	st2 := svc.Status(step2ID)
 	if st2.Status != "client_aborted" || st2.Exit != -1 {
 		t.Fatalf("step 2 status after abort = %+v, want client_aborted", st2)
+	}
+}
+
+func TestPolicyAddRuleLiveReload(t *testing.T) {
+	dir := t.TempDir()
+	policyPath := filepath.Join(dir, "policy.json")
+	if err := os.WriteFile(policyPath, []byte(`{"mode":"blacklist","default":"ask"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st := store.New(dir)
+	if err := st.Init(); err != nil {
+		t.Fatal(err)
+	}
+	svc := Service{
+		Conf:      config.Conf{StateDir: dir, Timeout: 5, Policy: policyPath},
+		Policy:    policy.Load(policyPath),
+		Store:     st,
+		Approvers: map[string]bool{},
+		Verdicts:  make(chan telegram.Verdict, 64),
+	}
+	res := svc.PolicyAddRule(protocol.PolicyAddRuleRequest{
+		Target: "whitelist", MatchType: "exact", Pattern: []string{"/bin/true"},
+	})
+	if !res.Success {
+		t.Fatalf("PolicyAddRule failed: %s", res.Error)
+	}
+	got := svc.Run(protocol.RunRequest{Argv: []string{"/bin/true"}, Cwd: t.TempDir(), Env: map[string]string{}}, 1000)
+	if got.Status != "allowed" {
+		t.Fatalf("after whitelist exact rule: Run = %+v, want allowed", got)
+	}
+	res = svc.PolicyAddRule(protocol.PolicyAddRuleRequest{
+		Target: "blacklist", MatchType: "base", Pattern: []string{"/bin/echo"},
+	})
+	if !res.Success {
+		t.Fatalf("PolicyAddRule base failed: %s", res.Error)
+	}
+	got = svc.Run(protocol.RunRequest{Argv: []string{"/bin/echo", "anything"}, Cwd: t.TempDir(), Env: map[string]string{}}, 1000)
+	if got.Status != "denied" {
+		t.Fatalf("after blacklist base rule: Run = %+v, want denied", got)
+	}
+	res = svc.PolicyAddRule(protocol.PolicyAddRuleRequest{
+		Target: "blacklist", MatchType: "custom", Pattern: []string{"/bin/ls", "*"},
+	})
+	if !res.Success {
+		t.Fatalf("PolicyAddRule custom failed: %s", res.Error)
+	}
+	got = svc.Run(protocol.RunRequest{Argv: []string{"/bin/ls", "-la", "/tmp"}, Cwd: t.TempDir(), Env: map[string]string{}}, 1000)
+	if got.Status != "denied" {
+		t.Fatalf("after blacklist custom rule: Run = %+v, want denied", got)
+	}
+	bad := svc.PolicyAddRule(protocol.PolicyAddRuleRequest{Target: "nope", MatchType: "exact", Pattern: []string{"/bin/x"}})
+	if bad.Success {
+		t.Error("bad target must fail")
 	}
 }

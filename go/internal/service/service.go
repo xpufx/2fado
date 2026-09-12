@@ -696,8 +696,17 @@ func (s Service) TelegramPump() {
 	}
 }
 
+// PolicyAddRule persists a whitelist/blacklist rule and reloads it live.
+func (s *Service) PolicyAddRule(req protocol.PolicyAddRuleRequest) protocol.PolicyAddRuleResponse {
+	p, n, err := policy.AddRule(s.Conf.Policy, req.Target, req.MatchType, req.Pattern)
+	if err != nil {
+		return protocol.PolicyAddRuleResponse{Success: false, Error: err.Error()}
+	}
+	s.Policy = p
+	return protocol.PolicyAddRuleResponse{Success: true, RulesCount: n}
+}
+
 // PreviewImpact analyzes the command argv, cwd, and environment to predict blast radius and risk.
 func (s Service) PreviewImpact(argv []string, cwd string, env []string) *protocol.PreviewRecord {
 	return PreviewImpact(argv, cwd, env)
 }
-

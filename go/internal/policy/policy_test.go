@@ -185,3 +185,45 @@ func TestLoad(t *testing.T) {
 		}
 	})
 }
+
+func TestAddRuleExactBaseCustom(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "policy.json")
+	if err := os.WriteFile(path, []byte(`{"mode":"blacklist","default":"ask"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := AddRule(path, "whitelist", "exact", []string{"/bin/echo", "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := AddRule(path, "whitelist", "base", []string{"/usr/bin/git"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := AddRule(path, "blacklist", "custom", []string{"/bin/rm", "*"}); err != nil {
+		t.Fatal(err)
+	}
+	p := Load(path)
+	if got := p.Tier([]string{"/bin/echo", "hi"}); got != "allow" {
+		t.Errorf("exact allow: Tier = %q, want allow", got)
+	}
+	if got := p.Tier([]string{"/usr/bin/git", "status", "--short"}); got != "allow" {
+		t.Errorf("base allow: Tier = %q, want allow", got)
+	}
+	if got := p.Tier([]string{"/bin/rm", "-rf", "/"}); got != "deny" {
+		t.Errorf("custom deny: Tier = %q, want deny", got)
+	}
+	if got := p.Tier([]string{"/bin/ls"}); got != "ask" {
+		t.Errorf("unlisted: Tier = %q, want ask", got)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Errorf("policy.json mode = %o, want 600", fi.Mode().Perm())
+	}
+	if _, _, err := AddRule(path, "nope", "exact", []string{"/bin/x"}); err == nil {
+		t.Error("bad target must fail")
+	}
+	if _, _, err := AddRule(path, "whitelist", "bogus", []string{"/bin/x"}); err == nil {
+		t.Error("bad match_type must fail")
+	}
+}

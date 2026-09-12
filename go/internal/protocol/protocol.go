@@ -33,6 +33,22 @@ type ClientMessage struct {
 	Status            *StatusRequest            `json:"status,omitempty"`
 	TelegramInfo      *TelegramInfoRequest      `json:"telegram_info,omitempty"`
 	TelegramSetConfig *TelegramSetConfigRequest `json:"telegram_set_config,omitempty"`
+	PolicyAddRule     *PolicyAddRuleRequest     `json:"policy_add_rule,omitempty"`
+}
+
+// PolicyAddRuleRequest asks the daemon to persist a whitelist/blacklist rule.
+// match_type: "exact" (full argv), "base" ([baseBinary]), "custom" (prefix, "*" = single-arg wildcard).
+type PolicyAddRuleRequest struct {
+	Target    string   `json:"target"`     // whitelist | blacklist
+	MatchType string   `json:"match_type"` // exact | base | custom
+	Pattern   []string `json:"pattern"`
+}
+
+// PolicyAddRuleResponse answers PolicyAddRuleRequest.
+type PolicyAddRuleResponse struct {
+	Success    bool   `json:"success"`
+	Error      string `json:"error,omitempty"`
+	RulesCount int    `json:"rules_count,omitempty"`
 }
 
 // TelegramInfoRequest asks for Telegram bot configuration status and recipient metadata.
