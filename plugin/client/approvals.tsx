@@ -131,9 +131,24 @@ export function ApprovalHeaderIcon(props: PluginButtonIconProps) {
   useNewPendingToast(data?.items);
 
   useEffect(() => {
-    headerRegistry
-      .get(workspaceId)
-      ?.update({ label: count > 0 ? `${count} pending` : undefined });
+    const reg = headerRegistry.get(workspaceId);
+    if (!reg) return;
+    if (count === 0) {
+      reg.update({ label: undefined });
+      return;
+    }
+    const base = `Pending (${count})`;
+    const ticker = `${base}  •  2fado  •  `;
+    let offset = 0;
+    reg.update({ label: base });
+
+    const interval = setInterval(() => {
+      offset = (offset + 1) % ticker.length;
+      const scrolled = ticker.slice(offset) + ticker.slice(0, offset);
+      reg.update({ label: scrolled });
+    }, 300);
+
+    return () => clearInterval(interval);
   }, [workspaceId, count]);
 
   return (
