@@ -30,6 +30,12 @@ func call(sock string, msg protocol.ClientMessage) ([]byte, error) {
 
 // Run ships argv+cwd+env, relays output, and exits with the remote code.
 func Run(sock string, argv []string) int {
+	return RunWithDetach(sock, argv, false)
+}
+
+// RunWithDetach ships argv+cwd+env; with detach it returns immediately
+// after the daemon accepts the request as pending.
+func RunWithDetach(sock string, argv []string, detach bool) int {
 	env := map[string]string{}
 	for _, kv := range os.Environ() {
 		for i := 0; i < len(kv); i++ {
@@ -41,7 +47,7 @@ func Run(sock string, argv []string) int {
 	}
 	cwd, _ := os.Getwd()
 	raw, err := call(sock, protocol.ClientMessage{
-		Run: &protocol.RunRequest{Argv: argv, Cwd: cwd, Env: env},
+		Run: &protocol.RunRequest{Argv: argv, Cwd: cwd, Env: env, Detach: detach},
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "2fado: "+err.Error())
@@ -50,6 +56,14 @@ func Run(sock string, argv []string) int {
 	var res protocol.RunResult
 	if err := json.Unmarshal(raw, &res); err != nil {
 		fmt.Fprintln(os.Stderr, "2fado: bad reply")
+		return 1
+	}
+	if res.Status == "pending" {
+		if detach {
+			fmt.Printf("2fado: request submitted (id: %s). Detached. Use '2fado status %s' to check outcome.\n", res.ID, res.ID)
+			return 0
+		}
+		fmt.Fprintf(os.Stderr, "2fado: request submitted, waiting for approval (id: %s)...\n", res.ID)
 		return 1
 	}
 	if res.Status == "allowed" {

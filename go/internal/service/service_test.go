@@ -545,3 +545,83 @@ func TestAdoptOrphansSkipsExpired(t *testing.T) {
 		t.Fatalf("expired orphan still listed: %+v", items)
 	}
 }
+
+func TestRunDetachedExecutesOnApproval(t *testing.T) {
+	svc := testService(t, policy.Policy{Default: "ask"})
+	svc.Conf.Timeout = 10
+	svc.Conf.DryRun = true
+
+	type runOut struct {
+		res protocol.RunResult
+	}
+	done := make(chan runOut, 1)
+	go func() {
+		res := svc.RunWithCancel(protocol.RunRequest{
+			Argv:   []string{"/bin/echo", "detached"},
+			Cwd:    t.TempDir(),
+			Env:    map[string]string{},
+			Detach: true,
+		}, 1000, nil)
+		done <- runOut{res: res}
+	}()
+
+	var out runOut
+	select {
+	case out = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("detached Run did not return immediately")
+	}
+	if out.res.Status != "pending" || out.res.ID == "" {
+		t.Fatalf("RunResult = %+v, want pending with ID", out.res)
+	}
+
+	if !svc.Store.Consume(out.res.ID, "approve", "operator") {
+		t.Fatal("failed to consume detached approval")
+	}
+
+	deadline := time.Now().Add(6 * time.Second)
+	for {
+		st := svc.Store.Status(out.res.ID, time.Now().Unix())
+		if st.Status == "completed" {
+			if st.Exit != 0 {
+				t.Fatalf("detached status = %+v, want exit 0", st)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("detached request not executed after approval, status=%+v", st)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func TestRunDetachedDenyRecordsDenied(t *testing.T) {
+	svc := testService(t, policy.Policy{Default: "ask"})
+	svc.Conf.Timeout = 10
+
+	res := svc.RunWithCancel(protocol.RunRequest{
+		Argv:   []string{"/bin/echo", "detached-deny"},
+		Cwd:    t.TempDir(),
+		Env:    map[string]string{},
+		Detach: true,
+	}, 1000, nil)
+	if res.Status != "pending" || res.ID == "" {
+		t.Fatalf("RunResult = %+v, want pending with ID", res)
+	}
+
+	if !svc.Store.Consume(res.ID, "deny", "operator") {
+		t.Fatal("failed to consume detached deny")
+	}
+
+	deadline := time.Now().Add(6 * time.Second)
+	for {
+		st := svc.Store.Status(res.ID, time.Now().Unix())
+		if st.Status == "denied" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("detached deny not recorded, status=%+v", st)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}

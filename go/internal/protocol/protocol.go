@@ -8,9 +8,10 @@ package protocol
 // RunRequest is what the client sends: the exact argv plus the caller's
 // execution context for environment reconstruction.
 type RunRequest struct {
-	Argv []string          `json:"argv"`
-	Cwd  string            `json:"cwd"`
-	Env  map[string]string `json:"env"`
+	Argv   []string          `json:"argv"`
+	Cwd    string            `json:"cwd"`
+	Env    map[string]string `json:"env"`
+	Detach bool              `json:"detach,omitempty"`
 }
 
 // VerdictSubmit records a human decision. In the PoC any local uid may
@@ -169,7 +170,8 @@ type RecentList struct {
 
 // RunResult is the daemon's final answer to a run request.
 type RunResult struct {
-	Status string `json:"status"` // allowed | denied
+	Status string `json:"status"` // allowed | denied | pending
+	ID     string `json:"id,omitempty"`
 	Exit   int    `json:"exit,omitempty"`
 	Output string `json:"output,omitempty"`
 	Reason string `json:"reason,omitempty"`

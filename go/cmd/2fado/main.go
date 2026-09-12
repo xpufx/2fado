@@ -74,13 +74,24 @@ func main() {
 		}
 	case "run":
 		args := os.Args[2:]
+		detach := false
+		var filtered []string
+		for _, a := range args {
+			switch a {
+			case "--detach", "-d", "--async":
+				detach = true
+			default:
+				filtered = append(filtered, a)
+			}
+		}
+		args = filtered
 		if len(args) > 0 && args[0] == "--" {
 			args = args[1:]
 		}
 		if len(args) == 0 {
 			os.Exit(usage())
 		}
-		os.Exit(client.Run(sock, args))
+		os.Exit(client.RunWithDetach(sock, args, detach))
 	case "approve", "deny":
 		if len(os.Args) != 3 {
 			os.Exit(usage())
