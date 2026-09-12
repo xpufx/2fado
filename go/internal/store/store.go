@@ -148,6 +148,7 @@ func (s Store) List(now int64) []protocol.PendingItem {
 			ExpiresIn: rec.Expires - now,
 			Step:      step,
 			ConfirmOf: rec.ConfirmOf,
+			Preview:   rec.Preview,
 		})
 	}
 	return out
@@ -288,6 +289,7 @@ func (s Store) Status(rid string, now int64) protocol.StatusResponse {
 				Exit:      -1,
 				Step:      step,
 				ConfirmOf: rec.ConfirmOf,
+				Preview:   rec.Preview,
 			}
 		}
 		return protocol.StatusResponse{
@@ -299,6 +301,7 @@ func (s Store) Status(rid string, now int64) protocol.StatusResponse {
 			Exit:      -1,
 			Step:      step,
 			ConfirmOf: rec.ConfirmOf,
+			Preview:   rec.Preview,
 		}
 	}
 
@@ -326,6 +329,7 @@ func (s Store) Status(rid string, now int64) protocol.StatusResponse {
 						Exit:      -1,
 						Step:      step,
 						ConfirmOf: rec.ConfirmOf,
+						Preview:   rec.Preview,
 					}
 				}
 			}
@@ -340,6 +344,7 @@ func (s Store) Status(rid string, now int64) protocol.StatusResponse {
 				Exit:      -1,
 				Step:      step,
 				ConfirmOf: rec.ConfirmOf,
+				Preview:   rec.Preview,
 			}
 		}
 		return protocol.StatusResponse{
@@ -353,6 +358,7 @@ func (s Store) Status(rid string, now int64) protocol.StatusResponse {
 			Exit:      -1,
 			Step:      step,
 			ConfirmOf: rec.ConfirmOf,
+			Preview:   rec.Preview,
 		}
 	}
 
@@ -400,6 +406,7 @@ func (s Store) Status(rid string, now int64) protocol.StatusResponse {
 		Output:    r.Output,
 		Step:      step,
 		ConfirmOf: rec.ConfirmOf,
+		Preview:   rec.Preview,
 	}
 }
 

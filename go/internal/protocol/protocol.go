@@ -63,6 +63,16 @@ type TelegramSetConfigResponse struct {
 	Error       string `json:"error,omitempty"`
 }
 
+// PreviewRecord holds impact and expansion preview analysis for an approval request.
+type PreviewRecord struct {
+	ResolvedBinary string   `json:"resolved_binary,omitempty"`
+	TargetCwd      string   `json:"target_cwd,omitempty"`
+	AffectedCount  int      `json:"affected_count,omitempty"`
+	SamplePaths    []string `json:"sample_paths,omitempty"`
+	RiskLevel      string   `json:"risk_level,omitempty"` // low | medium | high | critical
+	RiskReason     string   `json:"risk_reason,omitempty"`
+}
+
 // StatusRequest asks for the state and outcome of a specific request.
 type StatusRequest struct {
 	ID string `json:"id"`
@@ -71,18 +81,19 @@ type StatusRequest struct {
 // StatusResponse is the answer to a StatusRequest.
 // Status is one of: not_found | pending | confirming | running | completed | denied | timeout | client_aborted.
 type StatusResponse struct {
-	ID        string   `json:"id"`
-	Status    string   `json:"status"`
-	Argv      []string `json:"argv,omitempty"`
-	Cwd       string   `json:"cwd,omitempty"`
-	UID       uint32   `json:"uid,omitempty"`
-	ExpiresIn int64    `json:"expires_in,omitempty"`
-	Decision  string   `json:"decision,omitempty"`
-	By        string   `json:"by,omitempty"`
-	Exit      int      `json:"exit"`
-	Output    string   `json:"output,omitempty"`
-	Step      string   `json:"step,omitempty"`
-	ConfirmOf string   `json:"confirm_of,omitempty"`
+	ID        string         `json:"id"`
+	Status    string         `json:"status"`
+	Argv      []string       `json:"argv,omitempty"`
+	Cwd       string         `json:"cwd,omitempty"`
+	UID       uint32         `json:"uid,omitempty"`
+	ExpiresIn int64          `json:"expires_in,omitempty"`
+	Decision  string         `json:"decision,omitempty"`
+	By        string         `json:"by,omitempty"`
+	Exit      int            `json:"exit"`
+	Output    string         `json:"output,omitempty"`
+	Step      string         `json:"step,omitempty"`
+	ConfirmOf string         `json:"confirm_of,omitempty"`
+	Preview   *PreviewRecord `json:"preview,omitempty"`
 }
 
 // ListRequest asks for pending records (plugin server polls this).
@@ -90,13 +101,14 @@ type ListRequest struct{}
 
 // PendingItem is one row of the list answer.
 type PendingItem struct {
-	ID        string   `json:"id"`
-	Argv      []string `json:"argv"`
-	UID       uint32   `json:"uid"`
-	Cwd       string   `json:"cwd"`
-	ExpiresIn int64    `json:"expires_in"`
-	Step      string   `json:"step,omitempty"`
-	ConfirmOf string   `json:"confirm_of,omitempty"`
+	ID        string         `json:"id"`
+	Argv      []string       `json:"argv"`
+	UID       uint32         `json:"uid"`
+	Cwd       string         `json:"cwd"`
+	ExpiresIn int64          `json:"expires_in"`
+	Step      string         `json:"step,omitempty"`
+	ConfirmOf string         `json:"confirm_of,omitempty"`
+	Preview   *PreviewRecord `json:"preview,omitempty"`
 }
 
 // PendingList answers ListRequest: unexpired, undecided records only.
@@ -144,14 +156,15 @@ type VerdictAck struct {
 // PendingRecord is the authoritative stored request. Execution reads only
 // this — never anything that crossed a wire.
 type PendingRecord struct {
-	Argv      []string `json:"argv"`
-	UID       uint32   `json:"uid"`
-	Cwd       string   `json:"cwd"`
-	Expires   int64    `json:"expires"`
-	ChatID    string   `json:"chat_id,omitempty"`
-	MsgID     int64    `json:"message_id,omitempty"`
-	Step      string   `json:"step,omitempty"`
-	ConfirmOf string   `json:"confirm_of,omitempty"`
+	Argv      []string       `json:"argv"`
+	UID       uint32         `json:"uid"`
+	Cwd       string         `json:"cwd"`
+	Expires   int64          `json:"expires"`
+	ChatID    string         `json:"chat_id,omitempty"`
+	MsgID     int64          `json:"message_id,omitempty"`
+	Step      string         `json:"step,omitempty"`
+	ConfirmOf string         `json:"confirm_of,omitempty"`
+	Preview   *PreviewRecord `json:"preview,omitempty"`
 }
 
 // VerdictRecord is written once, atomically (O_EXCL): one verdict wins.

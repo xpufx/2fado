@@ -195,12 +195,14 @@ func (s Service) RunWithCancel(req protocol.RunRequest, uid uint32, cancel <-cha
 	}
 	rid := newRID()
 	expires := time.Now().Add(time.Duration(s.Conf.Timeout) * time.Second)
+	preview := PreviewImpact(req.Argv, req.Cwd, flatten(clean))
 	_ = s.Store.Save(protocol.PendingRecord{
 		Argv:    req.Argv,
 		UID:     uid,
 		Cwd:     req.Cwd,
 		Expires: expires.Unix(),
 		Step:    "initial",
+		Preview: preview,
 	}, rid)
 	s.page(rid, req, uid)
 	v := s.await(rid, expires, cancel)
@@ -255,6 +257,7 @@ func (s Service) confirm(rid1 string, req protocol.RunRequest, uid uint32, clean
 		ConfirmOf: rid1,
 		ChatID:    rec1.ChatID,
 		MsgID:     rec1.MsgID,
+		Preview:   rec1.Preview,
 	}, rid)
 	s.Store.Append(protocol.AuditEvent{
 		Ev:        "confirm",
@@ -692,3 +695,9 @@ func (s Service) TelegramPump() {
 		s.Store.Consume(v.RID, v.Decision, v.By)
 	}
 }
+
+// PreviewImpact analyzes the command argv, cwd, and environment to predict blast radius and risk.
+func (s Service) PreviewImpact(argv []string, cwd string, env []string) *protocol.PreviewRecord {
+	return PreviewImpact(argv, cwd, env)
+}
+
