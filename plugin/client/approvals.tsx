@@ -13,14 +13,19 @@ import {
   CodeBlock,
   Collapsible,
   EmptyState,
+  KeyValue,
+  KeyValueGroup,
   PluginThemeProvider,
+  StatusDot,
+  Tabs,
+  TextInput,
   copyToClipboard,
   usePluginSettings,
   usePluginTheme,
 } from "paseo-plugin-helper/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { Platform, Pressable, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, Text, View } from "react-native";
 import {
   approvalSettings,
   approvalStatus,
@@ -339,11 +344,9 @@ function ApprovalItem({
             <Text style={{ color: colors.statusDanger, fontSize: 12, fontWeight: "700" }}>
               ARE YOU SURE? Tap again to run
             </Text>
-            {item.confirmOf ? (
-              <Text style={{ color: colors.foregroundMuted, fontSize: 10 }}>
-                Second confirmation for #{item.confirmOf.slice(0, 8)}
-              </Text>
-            ) : null}
+            <Text style={{ color: colors.foregroundMuted, fontSize: 10 }}>
+              Step 2 of 2: High-security confirmation required
+            </Text>
           </View>
           <Badge label="2-step" variant="danger" styleVariant="solid" />
         </View>
@@ -514,30 +517,33 @@ function ApprovalItem({
           />
         </View>
       </View>
-      <View style={{ flexDirection: "row", gap: 8 }}>
-        <View style={{ flex: 1 }}>
-          <Button
-            label="Always approve…"
-            variant="secondary"
-            size="sm"
-            icon="Check"
-            accessibilityLabel={`Always approve ${item.id}`}
-            disabled={isDeciding}
-            onPress={() => onAlways(item, "whitelist")}
-          />
+      <Collapsible title="Policy shortcuts" icon="Settings" initiallyExpanded={false}>
+        <View style={{ flexDirection: "row", gap: 8, paddingTop: 4 }}>
+          <View style={{ flex: 1 }}>
+            <Button
+              label="Always approve"
+              variant="secondary"
+              size="sm"
+              icon="Check"
+              accessibilityLabel={`Always approve ${item.id}`}
+              disabled={isDeciding}
+              onPress={() => onAlways(item, "whitelist")}
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Button
+              label="Always deny"
+              variant="secondary"
+              size="sm"
+              icon="X"
+              accessibilityLabel={`Always deny ${item.id}`}
+              disabled={isDeciding}
+              onPress={() => onAlways(item, "blacklist")}
+            />
+          </View>
         </View>
-        <View style={{ flex: 1 }}>
-          <Button
-            label="Always deny…"
-            variant="secondary"
-            size="sm"
-            icon="X"
-            accessibilityLabel={`Always deny ${item.id}`}
-            disabled={isDeciding}
-            onPress={() => onAlways(item, "blacklist")}
-          />
-        </View>
-      </View>
+      </Collapsible>
+
     </Card>
   );
 }
@@ -657,12 +663,15 @@ function RecentItem({
     by: string;
     exit: number;
     output: string;
+    step?: "initial" | "confirm";
+    confirmOf?: string;
   };
 }) {
   const { colors } = usePluginTheme();
   const approved = item.decision === "approve";
   const executed = item.exit >= 0;
   const failed = executed && item.exit !== 0;
+  const isTwoStep = item.step === "confirm" || Boolean(item.confirmOf);
   const preview =
     item.output.length > OUTPUT_PREVIEW
       ? `${item.output.slice(0, OUTPUT_PREVIEW)}\n…[truncated]`
@@ -699,25 +708,24 @@ function RecentItem({
             · {item.by ? `by ${item.by}` : "local"}
           </Text>
         </View>
-        <Badge
-          label={approved ? (executed ? `exit ${item.exit}` : "approved") : "denied"}
-          variant={approved ? (failed ? "warning" : "success") : "danger"}
-          styleVariant="tinted"
-        />
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          {isTwoStep ? (
+            <Badge label="2-step" variant="danger" styleVariant="tinted" />
+          ) : null}
+          <Badge
+            label={approved ? (executed ? `exit ${item.exit}` : "approved") : "denied"}
+            variant={approved ? (failed ? "warning" : "success") : "danger"}
+            styleVariant="tinted"
+          />
+        </View>
       </View>
 
       <CommandBox argv={item.argv} />
 
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-        <Icon name="Folder" size={11} color={colors.foregroundMuted} />
-        <Text
-          numberOfLines={1}
-          ellipsizeMode="middle"
-          style={{ color: colors.foregroundMuted, fontSize: 11, fontFamily }}
-        >
-          {item.cwd}
-        </Text>
-      </View>
+      <KeyValueGroup columns={2}>
+        <KeyValue label="By" value={item.by || "local"} />
+        <KeyValue label="CWD" value={item.cwd} mono stackOnCompact />
+      </KeyValueGroup>
 
       {executed && preview.trim().length > 0 ? (
         <Collapsible
@@ -743,56 +751,41 @@ function TelegramStatusBar({ onOpenSettings }: { onOpenSettings(): void }) {
   const badgeVariant = isConnected ? "success" : info?.status === "error" ? "danger" : "neutral";
 
   return (
-    <View
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-        backgroundColor: colors.surface1,
-        borderColor: colors.border,
-        borderWidth: 1,
-        borderRadius: 6,
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        gap: 8,
-      }}
-    >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1 }}>
-        <Icon
-          name="Send"
-          size={12}
-          color={isConnected ? colors.statusSuccess : colors.foregroundMuted}
-        />
-        <Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "600" }}>
-          Telegram {isConnected ? "Active" : "Fallback"}
-        </Text>
-        {info?.botUsername ? (
-          <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>
-            @{info.botUsername}
+    <Card variant="flat" style={{ gap: 6 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <StatusDot variant={badgeVariant} size="md" pulse={isConnected} />
+          <Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "600" }}>
+            Telegram {isConnected ? "Active" : "Fallback"}
           </Text>
-        ) : null}
-        {info?.chatId ? (
-          <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>
-            · Chat {info.chatId}
-          </Text>
-        ) : null}
+        </View>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <Badge
+            label={isConnected ? "connected" : "unconfigured"}
+            variant={badgeVariant}
+            styleVariant="tinted"
+          />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Configure Telegram settings"
+            onPress={onOpenSettings}
+            style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, padding: 2 })}
+          >
+            <Icon name="Settings" size={13} color={colors.foregroundMuted} />
+          </Pressable>
+        </View>
       </View>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-        <Badge
-          label={isConnected ? "connected" : "unconfigured"}
-          variant={badgeVariant}
-          styleVariant="tinted"
-        />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Configure Telegram settings"
-          onPress={onOpenSettings}
-          style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, padding: 2 })}
-        >
-          <Icon name="Settings" size={13} color={colors.foregroundMuted} />
-        </Pressable>
-      </View>
-    </View>
+      {(info?.botUsername || info?.chatId) ? (
+        <KeyValueGroup columns={2}>
+          {info?.botUsername ? (
+            <KeyValue label="Bot" value={`@${info.botUsername}`} mono />
+          ) : null}
+          {info?.chatId ? (
+            <KeyValue label="Chat ID" value={info.chatId} mono copyable />
+          ) : null}
+        </KeyValueGroup>
+      ) : null}
+    </Card>
   );
 }
 
@@ -826,6 +819,7 @@ export function ApprovalSurface({
   const [policyScope, setPolicyScope] = useState<"exact" | "base" | "custom">("exact");
   const [customPattern, setCustomPattern] = useState("");
   const [policySaving, setPolicySaving] = useState(false);
+  const [activeTab, setActiveTab] = useState<"pending" | "history">("pending");
   const [activeExecutions, setActiveExecutions] = useState<
     Record<
       string,
@@ -908,17 +902,14 @@ export function ApprovalSurface({
             if (!isMountedRef.current) return;
 
             if (statusRes.status === "confirming") {
-              setActiveExecutions((prev) => ({
-                ...prev,
-                [id]: {
-                  id,
-                  decision: "approve",
-                  status: "confirming",
-                  argv: statusRes.argv ?? item.argv,
-                  cwd: statusRes.cwd ?? item.cwd,
-                },
-              }));
+              setActiveExecutions((prev) => {
+                const next = { ...prev };
+                delete next[id];
+                return next;
+              });
               void queryClient.invalidateQueries({ queryKey: LIST_KEY });
+              void queryClient.invalidateQueries({ queryKey: RECENT_KEY });
+              return;
             }
 
             if (statusRes.status === "completed") {
@@ -1008,7 +999,21 @@ export function ApprovalSurface({
   useNewPendingToast(query.data?.items);
 
   const items = query.data?.items ?? [];
-  const recentItems = recent.data?.items ?? [];
+  const rawRecentItems = recent.data?.items ?? [];
+
+  // When a 2-step confirmation is in progress, the second approval replaces the first one:
+  // 1. Hide approved 1st step from Recent while its 2nd step confirmation is active in Pending.
+  // 2. Hide approved 1st step from Recent if the completed 2nd step confirmation is already in Recent.
+  const pendingConfirmOfSet = new Set(
+    items.map((i) => i.confirmOf).filter((c): c is string => Boolean(c)),
+  );
+  const recentConfirmOfSet = new Set(
+    rawRecentItems.map((i) => i.confirmOf).filter((c): c is string => Boolean(c)),
+  );
+
+  const recentItems = rawRecentItems.filter(
+    (item) => !pendingConfirmOfSet.has(item.id) && !recentConfirmOfSet.has(item.id),
+  );
   const activeList = Object.values(activeExecutions);
 
   const openPolicyDialog = (
@@ -1074,191 +1079,176 @@ export function ApprovalSurface({
         }}
       >
         <View style={{ width: "100%", maxWidth: 640, alignSelf: "center", gap: 10 }}>
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "space-between",
-              paddingVertical: 6,
-              borderBottomWidth: 1,
-              borderBottomColor: theme.colors.border,
-              marginBottom: 2,
-            }}
-          >
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-              <View
-                style={{
-                  width: 30,
-                  height: 30,
-                  borderRadius: 6,
-                  backgroundColor: theme.colors.surface1,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  borderWidth: 1,
-                  borderColor: theme.colors.border,
-                }}
-              >
-                <Icon name="ShieldCheck" size={17} color={theme.colors.accent} />
-              </View>
-              <View>
-                <Text style={{ color: theme.colors.foreground, fontSize: 15, fontWeight: "700" }}>
-                  2fado approvals
-                </Text>
-                <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
-                  Privileged command gating
-                </Text>
-              </View>
-            </View>
-            <Button
-              label="Settings"
-              variant="secondary"
-              size="sm"
-              icon="Settings"
-              accessibilityLabel="Open 2fado settings"
-              onPress={onOpenSettings}
-            />
-          </View>
+          <Card.Header
+            title="2fado approvals"
+            subtitle="Privileged command gating"
+            icon="ShieldCheck"
+            action={
+              <Button
+                label="Settings"
+                variant="secondary"
+                size="sm"
+                icon="Settings"
+                accessibilityLabel="Open 2fado settings"
+                onPress={onOpenSettings}
+              />
+            }
+          />
 
           <TelegramStatusBar onOpenSettings={onOpenSettings} />
 
-          <SectionHeader title="Pending" count={query.data ? items.length : undefined} />
-          {query.isPending ? (
-            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>Loading…</Text>
-          ) : null}
-          {query.isError ? (
-            <Card style={{ borderLeftWidth: 3, borderLeftColor: theme.colors.statusDanger }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <Icon name="CloudOff" size={16} color={theme.colors.statusDanger} />
-                <Text style={{ color: theme.colors.foreground, fontSize: 13, fontWeight: "600" }}>
-                  2fadod unreachable
-                </Text>
-              </View>
-              <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, marginTop: 4 }}>
-                Check the socket path in settings.
-              </Text>
-            </Card>
-          ) : null}
-          {!query.isPending && !query.isError && items.length === 0 && activeList.length === 0 ? (
-            <EmptyState
-              icon="ShieldCheck"
-              title="All clear"
-              description="No commands waiting for authorization."
-            />
-          ) : null}
-          {items.map((item) => (
-            <ApprovalItem
-              key={item.id}
-              item={item}
-              deciding={decidingMap[item.id]}
-              onDecide={(target, decision) => handleDecide(target, decision)}
-              onAlways={(target, decision) => openPolicyDialog(target, decision)}
-            />
-          ))}
-          {policyDialog ? (
-            <Card
-              style={{
-                borderLeftWidth: 3,
-                borderLeftColor: theme.colors.accent,
-                gap: 8,
-                padding: 12,
-              }}
-            >
-              <Text style={{ color: theme.colors.foreground, fontSize: 13, fontWeight: "700" }}>
-                {policyDialog.target === "whitelist" ? "Always approve" : "Always deny"} — pick scope
-              </Text>
-              {(["exact", "base", "custom"] as const).map((scope) => (
-                <Pressable
-                  key={scope}
-                  accessibilityRole="button"
-                  onPress={() => setPolicyScope(scope)}
-                  style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 }}
-                >
-                  <View
-                    style={{
-                      width: 14,
-                      height: 14,
-                      borderRadius: 7,
-                      borderWidth: 2,
-                      borderColor: theme.colors.accent,
-                      backgroundColor:
-                        policyScope === scope ? theme.colors.accent : "transparent",
-                    }}
-                  />
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: theme.colors.foreground, fontSize: 12, fontWeight: "600" }}>
-                      {scope === "exact" ? "Exact match" : scope === "base" ? "Base binary" : "Custom pattern"}
-                    </Text>
-                    <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
-                      {scope === "exact" ? policyExact : scope === "base" ? policyBase : "Edit arguments below"}
+          <Tabs
+            tabs={[
+              {
+                id: "pending",
+                label: "Pending",
+                icon: "ShieldCheck",
+                badge: items.length > 0 ? items.length : undefined,
+              },
+              {
+                id: "history",
+                label: "History",
+                icon: "History",
+              },
+            ]}
+            activeTab={activeTab}
+            onTabChange={(id) => setActiveTab(id as "pending" | "history")}
+          />
+
+          {activeTab === "pending" ? (
+            <>
+              {query.isPending ? (
+                <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>Loading…</Text>
+              ) : null}
+              {query.isError ? (
+                <Card style={{ borderLeftWidth: 3, borderLeftColor: theme.colors.statusDanger }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <Icon name="CloudOff" size={16} color={theme.colors.statusDanger} />
+                    <Text style={{ color: theme.colors.foreground, fontSize: 13, fontWeight: "600" }}>
+                      2fadod unreachable
                     </Text>
                   </View>
-                </Pressable>
-              ))}
-              {policyScope === "custom" ? (
-                <TextInput
-                  value={customPattern}
-                  onChangeText={setCustomPattern}
-                  placeholder="command arguments"
-                  placeholderTextColor={theme.colors.foregroundMuted}
-                  style={{
-                    color: theme.colors.foreground,
-                    borderColor: theme.colors.border,
-                    borderWidth: 1,
-                    borderRadius: 6,
-                    paddingHorizontal: 8,
-                    paddingVertical: 6,
-                    fontSize: 12,
-                  }}
+                  <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, marginTop: 4 }}>
+                    Check the socket path in settings.
+                  </Text>
+                </Card>
+              ) : null}
+              {!query.isPending && !query.isError && items.length === 0 && activeList.length === 0 ? (
+                <EmptyState
+                  icon="ShieldCheck"
+                  title="All clear"
+                  description="No commands waiting for authorization."
                 />
               ) : null}
-              <View style={{ flexDirection: "row", gap: 8 }}>
-                <View style={{ flex: 1 }}>
-                  <Button
-                    label="Cancel"
-                    variant="secondary"
-                    size="sm"
-                    onPress={() => setPolicyDialog(null)}
-                    disabled={policySaving}
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Button
-                    label={policyDialog.target === "whitelist" ? "Save & approve" : "Save & deny"}
-                    variant="primary"
-                    size="sm"
-                    icon="Check"
-                    onPress={() => void submitPolicyRule()}
-                    loading={policySaving}
-                    disabled={policySaving}
-                  />
-                </View>
-              </View>
-            </Card>
-          ) : null}
+              {items.map((item) => (
+                <ApprovalItem
+                  key={item.id}
+                  item={item}
+                  deciding={decidingMap[item.id]}
+                  onDecide={(target, decision) => handleDecide(target, decision)}
+                  onAlways={(target, decision) => openPolicyDialog(target, decision)}
+                />
+              ))}
+              {policyDialog ? (
+                <Card
+                  style={{
+                    borderLeftWidth: 3,
+                    borderLeftColor: theme.colors.accent,
+                    gap: 8,
+                    padding: 12,
+                  }}
+                >
+                  <Text style={{ color: theme.colors.foreground, fontSize: 13, fontWeight: "700" }}>
+                    {policyDialog.target === "whitelist" ? "Always approve" : "Always deny"} — pick scope
+                  </Text>
+                  {(["exact", "base", "custom"] as const).map((scope) => (
+                    <Pressable
+                      key={scope}
+                      accessibilityRole="button"
+                      onPress={() => setPolicyScope(scope)}
+                      style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 }}
+                    >
+                      <View
+                        style={{
+                          width: 14,
+                          height: 14,
+                          borderRadius: 7,
+                          borderWidth: 2,
+                          borderColor: theme.colors.accent,
+                          backgroundColor:
+                            policyScope === scope ? theme.colors.accent : "transparent",
+                        }}
+                      />
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: theme.colors.foreground, fontSize: 12, fontWeight: "600" }}>
+                          {scope === "exact" ? "Exact match" : scope === "base" ? "Base binary" : "Custom pattern"}
+                        </Text>
+                        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
+                          {scope === "exact" ? policyExact : scope === "base" ? policyBase : "Edit arguments below"}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  ))}
+                  {policyScope === "custom" ? (
+                    <TextInput
+                      value={customPattern}
+                      onChangeText={setCustomPattern}
+                      placeholder="command arguments"
+                      mono
+                    />
+                  ) : null}
+                  <View style={{ flexDirection: "row", gap: 8 }}>
+                    <View style={{ flex: 1 }}>
+                      <Button
+                        label="Cancel"
+                        variant="secondary"
+                        size="sm"
+                        onPress={() => setPolicyDialog(null)}
+                        disabled={policySaving}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Button
+                        label={policyDialog.target === "whitelist" ? "Save & approve" : "Save & deny"}
+                        variant="primary"
+                        size="sm"
+                        icon="Check"
+                        onPress={() => void submitPolicyRule()}
+                        loading={policySaving}
+                        disabled={policySaving}
+                      />
+                    </View>
+                  </View>
+                </Card>
+              ) : null}
 
-          {activeList.length > 0 ? (
+              {activeList.length > 0 ? (
+                <>
+                  <SectionHeader title="In flight" count={activeList.length} />
+                  {activeList.map((item) => (
+                    <ExecutingItem key={item.id} item={item} />
+                  ))}
+                </>
+              ) : null}
+            </>
+          ) : (
             <>
-              <SectionHeader title="In flight" count={activeList.length} />
-              {activeList.map((item) => (
-                <ExecutingItem key={item.id} item={item} />
+              {recent.isPending ? (
+                <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>Loading…</Text>
+              ) : null}
+              {!recent.isPending && recentItems.length === 0 ? (
+                <EmptyState
+                  icon="History"
+                  title="No history yet"
+                  description="Decided requests will appear here with execution status and output."
+                />
+              ) : null}
+              {recentItems.map((item) => (
+                <RecentItem key={item.id} item={item} />
               ))}
             </>
-          ) : null}
+          )}
 
-          <SectionHeader title="Recent" />
-          {recent.isPending ? (
-            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>Loading…</Text>
-          ) : null}
-          {!recent.isPending && recentItems.length === 0 ? (
-            <EmptyState
-              icon="History"
-              title="No history yet"
-              description="Decided requests will appear here with execution status and output."
-            />
-          ) : null}
-          {recentItems.map((item) => (
-            <RecentItem key={item.id} item={item} />
-          ))}
         </View>
       </ScrollView>
     </PluginThemeProvider>
