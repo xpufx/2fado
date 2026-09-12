@@ -1,2 +1,0 @@
-2fadod: no BOT_TOKEN configured, pager=stdout; verdicts via `2fado approve|deny <id>`
-2fadod listening on /tmp/2fado.sock (state /tmp/2fado-state)
