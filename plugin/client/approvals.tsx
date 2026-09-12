@@ -140,10 +140,21 @@ export function ApprovalHeaderIcon(props: PluginButtonIconProps) {
     <PluginThemeProvider theme={{ colors: theme.colors }}>
       <AttentionBeacon
         active={count > 0}
-        mode="badge"
+        mode="bounce"
         tone={hasConfirm ? "danger" : "warning"}
+        style={{ overflow: "visible" }}
       >
-        <Icon name="ShieldCheck" size={size} color={color} />
+        <Icon
+          name="ShieldCheck"
+          size={size}
+          color={
+            count > 0
+              ? hasConfirm
+                ? theme.colors.statusDanger || "#ef4444"
+                : theme.colors.statusWarning || "#f59e0b"
+              : color
+          }
+        />
       </AttentionBeacon>
     </PluginThemeProvider>
   );
