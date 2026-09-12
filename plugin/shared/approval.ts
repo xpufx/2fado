@@ -141,7 +141,7 @@ export interface PolicyAddRuleResult {
 }
 
 export const policyAddRule = defineContract({
-  name: "approval.policyAddRule",
+  name: "approval.policy_add_rule",
   input: z.object({
     target: z.enum(["whitelist", "blacklist"]),
     match_type: z.enum(["exact", "base", "custom"]),
