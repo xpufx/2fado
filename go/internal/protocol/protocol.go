@@ -34,6 +34,17 @@ type ClientMessage struct {
 	TelegramInfo      *TelegramInfoRequest      `json:"telegram_info,omitempty"`
 	TelegramSetConfig *TelegramSetConfigRequest `json:"telegram_set_config,omitempty"`
 	PolicyAddRule     *PolicyAddRuleRequest     `json:"policy_add_rule,omitempty"`
+	Version           *VersionRequest           `json:"version,omitempty"`
+}
+
+type VersionRequest struct{}
+
+type VersionResponse struct {
+	Version      string `json:"version"`
+	GitCommit    string `json:"git_commit"`
+	BuildTime    string `json:"build_time"`
+	BinarySHA256 string `json:"binary_sha256"`
+	PID          int    `json:"pid"`
 }
 
 // PolicyAddRuleRequest asks the daemon to persist a whitelist/blacklist rule.

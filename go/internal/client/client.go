@@ -103,3 +103,23 @@ func Status(sock, id string) int {
 	}
 	return 0
 }
+
+// SocketVersion queries the daemon for its build version over the socket.
+func SocketVersion(sock string) int {
+	raw, err := call(sock, protocol.ClientMessage{
+		Version: &protocol.VersionRequest{},
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "2fado: "+err.Error())
+		return 1
+	}
+	var res protocol.VersionResponse
+	if err := json.Unmarshal(raw, &res); err != nil {
+		fmt.Fprintln(os.Stderr, "2fado: bad reply")
+		return 1
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(res)
+	return 0
+}

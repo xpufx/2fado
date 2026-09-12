@@ -6,15 +6,54 @@ package daemon
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"strconv"
 	"sync"
 
 	"2fado/internal/protocol"
 	"2fado/internal/service"
 )
+
+var (
+	daemonVersion   = "0.1.0-dev"
+	daemonGitCommit = "unknown"
+	daemonBuildTime = "unknown"
+	daemonBinarySHA = ""
+)
+
+func SetBuildInfo(version, commit, buildTime string) {
+	daemonVersion, daemonGitCommit, daemonBuildTime = version, commit, buildTime
+}
+
+func computeBinarySHA() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "unknown"
+	}
+	f, err := os.Open(exe)
+	if err != nil {
+		return "unknown"
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "unknown"
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func pidFilePath() string {
+	if p := os.Getenv("TWOFADO_PID_FILE"); p != "" {
+		return p
+	}
+	return "/tmp/2fado.pid"
+}
 
 func peerUID(c net.Conn) uint32 {
 	uc, ok := c.(*net.UnixConn)
@@ -35,6 +74,10 @@ func peerUID(c net.Conn) uint32 {
 }
 
 func Serve(svc service.Service) error {
+	daemonBinarySHA = computeBinarySHA()
+	pidFile := pidFilePath()
+	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o644)
+	defer os.Remove(pidFile)
 	tryRemove(svc.Conf.Socket)
 	l, err := net.Listen("unix", svc.Conf.Socket)
 	if err != nil {
@@ -98,6 +141,14 @@ func handle(svc *service.Service, c net.Conn) {
 		out, _ = json.Marshal(svc.TelegramSetConfig(*msg.TelegramSetConfig))
 	case msg.PolicyAddRule != nil:
 		out, _ = json.Marshal(svc.PolicyAddRule(*msg.PolicyAddRule))
+	case msg.Version != nil:
+		out, _ = json.Marshal(protocol.VersionResponse{
+			Version:      daemonVersion,
+			GitCommit:    daemonGitCommit,
+			BuildTime:    daemonBuildTime,
+			BinarySHA256: daemonBinarySHA,
+			PID:          os.Getpid(),
+		})
 	default:
 		return
 	}
