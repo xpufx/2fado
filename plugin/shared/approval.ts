@@ -58,6 +58,8 @@ export const recentList = defineContract({
         by: z.string(),
         exit: z.number(),
         output: z.string(),
+        step: z.enum(["initial", "confirm"]).optional(),
+        confirmOf: z.string().optional(),
       }),
     ),
   }),

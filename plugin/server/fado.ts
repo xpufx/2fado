@@ -62,6 +62,8 @@ interface DaemonRecentItem {
   by: string;
   exit: number;
   output: string;
+  step?: string;
+  confirm_of?: string;
 }
 
 interface DaemonRecentList {
@@ -208,6 +210,8 @@ async function listRecentInner(
         by: typeof item.by === "string" ? item.by : "",
         exit: typeof item.exit === "number" ? item.exit : -1,
         output: typeof item.output === "string" ? item.output : "",
+        step: item.step === "confirm" ? ("confirm" as const) : ("initial" as const),
+        confirmOf: item.confirm_of,
       })),
     };
   } catch (err) {
