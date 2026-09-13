@@ -82,6 +82,35 @@ func TestScrubEnvKeepCannotOverrideDeny(t *testing.T) {
 	}
 }
 
+func TestScrubEnvDropsLinkerShellOverrides(t *testing.T) {
+	dangerous := []string{
+		"LD_PRELOAD",
+		"GLIBC_TUNABLES",
+		"GCONV_PATH",
+		"DYLD_INSERT_LIBRARIES",
+		"IFS",
+		"BASH_FUNC_foo",
+		"BASHOPTS",
+		"SHELLOPTS",
+		"HOSTALIASES",
+	}
+	keep := append([]string{"TERM"}, dangerous...)
+	svc := testService(t, policy.Policy{Default: "ask", EnvKeep: keep})
+	env := map[string]string{"TERM": "xterm"}
+	for _, k := range dangerous {
+		env[k] = "evil"
+	}
+	clean, _ := svc.ScrubEnv(env)
+	for _, k := range dangerous {
+		if _, ok := clean[k]; ok {
+			t.Errorf("%s survived scrub despite EnvKeep", k)
+		}
+	}
+	if clean["TERM"] != "xterm" {
+		t.Errorf("TERM should survive, got %q", clean["TERM"])
+	}
+}
+
 func TestRunAllowTierExecutesWithoutPaging(t *testing.T) {
 	svc := testService(t, policy.Policy{
 		Whitelist: [][]string{{"/bin/true"}},

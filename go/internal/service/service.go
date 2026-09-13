@@ -27,7 +27,7 @@ import (
 	"2fado/internal/telegram"
 )
 
-var envDeny = regexp.MustCompile(`^(LD_|PYTHON|PERL|RUBYOPT|NODE_|BASH_ENV|ENV=|CDPATH=)`)
+var envDeny = regexp.MustCompile(`^(LD_|GLIBC_|GCONV_|DYLD_|IFS|BASH_FUNC_|BASHOPTS|SHELLOPTS|HOSTALIASES|PYTHON|PERL|RUBYOPT|NODE_|BASH_ENV|ENV=|CDPATH=)`)
 
 const safePath = "/usr/sbin:/usr/bin:/sbin:/bin"
 
@@ -132,6 +132,29 @@ func (s Service) targetUID() (uint32, error) {
 	return uint32(n), nil
 }
 
+// resolveCredential builds the full credential set for the target UID:
+// real primary GID plus supplementary groups, so the child drops every
+// caller group instead of inheriting e.g. root/wheel/sudo/docker.
+func resolveCredential(uid uint32) (*syscall.Credential, error) {
+	u, err := user.LookupId(strconv.Itoa(int(uid)))
+	if err != nil {
+		return nil, err
+	}
+	gid, err := strconv.Atoi(u.Gid)
+	if err != nil {
+		return nil, err
+	}
+	var groups []uint32
+	if gids, err := u.GroupIds(); err == nil {
+		for _, g := range gids {
+			if n, err := strconv.Atoi(g); err == nil {
+				groups = append(groups, uint32(n))
+			}
+		}
+	}
+	return &syscall.Credential{Uid: uid, Gid: uint32(gid), Groups: groups}, nil
+}
+
 // Execute runs argv with reconstructed cwd/env as the policy target.
 // Callers pass the stored record fields — never wire content.
 // Dry-run short-circuits before any spawn: nothing executes, exit 0.
@@ -147,8 +170,12 @@ func (s Service) Execute(argv []string, cwd string, env map[string]string) (code
 	cmd.Dir = cwd
 	cmd.Env = flatten(env)
 	if uid != uint32(os.Geteuid()) || os.Geteuid() == 0 {
+		cred, err := resolveCredential(uid)
+		if err != nil {
+			return 1, "2fadod: bad target_user: " + err.Error(), uint32(os.Geteuid())
+		}
 		cmd.SysProcAttr = &syscall.SysProcAttr{
-			Credential: &syscall.Credential{Uid: uid, Gid: uid},
+			Credential: cred,
 			Setsid:     true,
 		}
 	}
