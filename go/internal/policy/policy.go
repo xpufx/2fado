@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // Modes: "blacklist" (whitelist runs, blacklist denies, rest falls to
@@ -60,6 +62,9 @@ func (p Policy) NeedsConfirm(argv []string) bool {
 
 func (p Policy) Tier(argv []string) string {
 	for _, a := range p.Whitelist {
+		if len(a) == 1 && isRestrictedBase(a[0]) {
+			continue
+		}
 		if matchRule(argv, a) {
 			return "allow"
 		}
@@ -75,8 +80,45 @@ func (p Policy) Tier(argv []string) string {
 	return p.Default
 }
 
+// restrictedTools are interpreters, shells, and exfiltration binaries that
+// must never be whitelisted as a bare base binary: a single-element rule
+// would otherwise allow arbitrary arguments (python3 -c, curl @/etc/shadow).
+var restrictedTools = map[string]bool{
+	"bash": true, "sh": true, "zsh": true,
+	"python": true, "python3": true, "node": true, "ruby": true,
+	"perl": true, "php": true, "curl": true, "wget": true, "nc": true,
+}
+
+func isRestrictedBase(s string) bool {
+	return restrictedTools[filepath.Base(filepath.Clean(s))]
+}
+
+// canonExe resolves an argv[0]/rule element to a canonical path plus its
+// base name. Bare names go through exec.LookPath; paths are Cleaned only
+// (no filesystem resolution, avoiding TOCTOU between check and spawn).
+func canonExe(s string) (path, base string) {
+	cleaned := filepath.Clean(s)
+	base = filepath.Base(cleaned)
+	if !strings.ContainsRune(cleaned, '/') {
+		if resolved, err := exec.LookPath(cleaned); err == nil {
+			return filepath.Clean(resolved), base
+		}
+		return cleaned, base
+	}
+	return cleaned, base
+}
+
+// exeMatch reports whether two executable references name the same binary,
+// comparing canonical paths and falling back to base names so rules match
+// whether invoked by bare name (git) or path (/usr/bin/git, ./rm).
+func exeMatch(a, b string) bool {
+	pa, ba := canonExe(a)
+	pb, bb := canonExe(b)
+	return pa == pb || ba == bb
+}
+
 // matchRule reports whether argv matches a stored rule vector.
-// Single-element vectors are base-binary matches (argv[0] equal).
+// Single-element vectors are base-binary matches (canonical exe equality).
 // Vectors containing "*" use single-arg wildcard matching ("*" matches
 // exactly one arg; trailing "*" matches any suffix). All other vectors
 // require exact argv equality.
@@ -95,22 +137,38 @@ func matchRule(argv, rule []string) bool {
 		return matchWild(argv, rule)
 	}
 	if len(rule) == 1 {
-		return argv[0] == rule[0]
+		return exeMatch(argv[0], rule[0])
 	}
 	return equal(argv, rule)
 }
 
 func matchWild(argv, rule []string) bool {
-	if len(rule) > 0 && rule[len(rule)-1] == "*" && len(rule) == 2 && rule[0] == "*" {
-		return true
+	if len(rule) == 1 && rule[0] == "*" {
+		return false
 	}
 	if rule[len(rule)-1] == "*" {
 		prefix := rule[:len(rule)-1]
+		anchored := false
+		for _, e := range prefix {
+			if e != "*" {
+				anchored = true
+				break
+			}
+		}
+		if !anchored {
+			return false
+		}
 		if len(argv) < len(prefix) {
 			return false
 		}
 		for i := range prefix {
 			if prefix[i] == "*" {
+				continue
+			}
+			if i == 0 {
+				if !exeMatch(argv[0], prefix[0]) {
+					return false
+				}
 				continue
 			}
 			if argv[i] != prefix[i] {
@@ -158,6 +216,9 @@ func AddRule(path, target, matchType string, pattern []string) (Policy, int, err
 	case "base":
 		if len(pattern) != 1 || pattern[0] == "*" {
 			return Policy{}, 0, fmt.Errorf("base pattern must be [baseBinary]")
+		}
+		if target == "whitelist" && isRestrictedBase(pattern[0]) {
+			return Policy{}, 0, fmt.Errorf("base whitelist of %q forbidden: require explicit arguments", pattern[0])
 		}
 	case "custom":
 	default:

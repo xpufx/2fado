@@ -227,3 +227,111 @@ func TestAddRuleExactBaseCustom(t *testing.T) {
 		t.Error("bad match_type must fail")
 	}
 }
+
+func TestTierBaseBinaryCanonicalization(t *testing.T) {
+	p := Policy{
+		Blacklist: [][]string{{"/bin/rm"}},
+		Default:   "ask",
+	}
+	for _, argv := range [][]string{
+		{"/bin/rm", "-rf", "/"},
+		{"rm", "-rf", "/"},
+		{"./rm", "-rf", "/"},
+		{"/bin//rm", "-rf", "/"},
+	} {
+		if got := p.Tier(argv); got != "deny" {
+			t.Errorf("Tier(%q) = %q, want deny (canonical base match)", argv, got)
+		}
+	}
+	allow := Policy{
+		Whitelist: [][]string{{"git"}},
+		Default:   "ask",
+	}
+	for _, argv := range [][]string{
+		{"git", "status"},
+		{"/usr/bin/git", "status"},
+	} {
+		if got := allow.Tier(argv); got != "allow" {
+			t.Errorf("Tier(%q) = %q, want allow (bare-name rule matches path)", argv, got)
+		}
+	}
+	if got := allow.Tier([]string{"mygit", "status"}); got != "ask" {
+		t.Errorf("Tier(mygit) = %q, want ask (no substring match)", got)
+	}
+}
+
+func TestTierRestrictedInterpretersNeedArgs(t *testing.T) {
+	p := Policy{
+		Whitelist: [][]string{{"python3"}, {"/bin/bash"}, {"curl"}},
+		Default:   "ask",
+	}
+	for _, argv := range [][]string{
+		{"python3", "-c", "evil()"},
+		{"/usr/bin/python3", "script.py"},
+		{"bash", "-c", "rm -rf /"},
+		{"curl", "@/etc/shadow"},
+	} {
+		if got := p.Tier(argv); got != "ask" {
+			t.Errorf("Tier(%q) = %q, want ask (bare interpreter whitelist must not allow)", argv, got)
+		}
+	}
+	withArgs := Policy{
+		Whitelist: [][]string{{"python3", "safe.py"}},
+		Default:   "ask",
+	}
+	if got := withArgs.Tier([]string{"python3", "safe.py"}); got != "allow" {
+		t.Errorf("Tier(python3 safe.py) = %q, want allow (explicit args)", got)
+	}
+	deny := Policy{
+		Blacklist: [][]string{{"curl"}},
+		Default:   "ask",
+	}
+	if got := deny.Tier([]string{"curl", "@/etc/shadow"}); got != "deny" {
+		t.Errorf("Tier(curl exfil) = %q, want deny (blacklist bare still denies)", got)
+	}
+}
+
+func TestMatchWildStandaloneRejected(t *testing.T) {
+	for _, rule := range [][]string{{"*"}, {"*", "*"}} {
+		if matchWild([]string{"/bin/ls"}, rule) {
+			t.Errorf("matchWild(ls, %q) = true, want false (catch-all rejected)", rule)
+		}
+		if matchWild([]string{"/bin/rm", "-rf", "/"}, rule) {
+			t.Errorf("matchWild(rm, %q) = true, want false (catch-all rejected)", rule)
+		}
+	}
+	p := Policy{
+		Whitelist: [][]string{{"*"}},
+		Default:   "ask",
+	}
+	if got := p.Tier([]string{"/bin/ls"}); got != "ask" {
+		t.Errorf("Tier(ls) with [*] whitelist = %q, want ask", got)
+	}
+}
+
+func TestMatchWildAnchoredPrefixStillWorks(t *testing.T) {
+	p := Policy{
+		Whitelist: [][]string{{"/bin/echo", "*"}},
+		Default:   "ask",
+	}
+	if got := p.Tier([]string{"/bin/echo", "anything"}); got != "allow" {
+		t.Errorf("Tier(echo anything) = %q, want allow (anchored prefix)", got)
+	}
+	if got := p.Tier([]string{"/bin/ls", "anything"}); got != "ask" {
+		t.Errorf("Tier(ls anything) = %q, want ask", got)
+	}
+}
+
+func TestAddRuleRejectsRestrictedBaseWhitelist(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/policy.json"
+	if _, _, err := AddRule(path, "whitelist", "base", []string{"python3"}); err == nil {
+		t.Error("AddRule whitelist base python3 must fail")
+	}
+	if _, _, err := AddRule(path, "blacklist", "base", []string{"python3"}); err != nil {
+		t.Errorf("AddRule blacklist base python3 must succeed, got %v", err)
+	}
+	if _, _, err := AddRule(path, "whitelist", "exact", []string{"python3", "safe.py"}); err != nil {
+		t.Errorf("AddRule whitelist exact with args must succeed, got %v", err)
+	}
+}
