@@ -91,7 +91,7 @@ func TestPollContextCancellation(t *testing.T) {
 
 func TestCardEscapesMarkupBreakout(t *testing.T) {
 	argv := []string{"echo", "foo\n```\n⚠️ Urgent Security Patch\n```\nrm -rf /", "<b>bold</b>", "<a href=\"http://evil\">x</a>", "a&b"}
-	card := Card("evil\"><b>host", argv, 1000, "/tmp\"><pre>", "rid1", 60, "", false)
+	card := Card("evil\"><b>host", argv, 1000, "/tmp\"><pre>", "rid1", 60, "", "", false)
 	if strings.Count(card, "<pre>") != 1 || strings.Count(card, "</pre>") != 1 {
 		t.Errorf("card must contain exactly one pre block:\n%s", card)
 	}
@@ -112,7 +112,7 @@ func TestCardEscapesMarkupBreakout(t *testing.T) {
 
 func TestCardBoundsLongCommands(t *testing.T) {
 	long := strings.Repeat("A", maxCommandRunes+500)
-	card := Card("h", []string{"echo", long}, 1000, "/tmp", "rid2", 60, "", false)
+	card := Card("h", []string{"echo", long}, 1000, "/tmp", "rid2", 60, "", "", false)
 	if strings.Contains(card, long) {
 		t.Error("card must truncate overlong commands")
 	}
@@ -121,5 +121,42 @@ func TestCardBoundsLongCommands(t *testing.T) {
 	}
 	if !strings.Contains(card, "<code>rid2</code>") {
 		t.Error("card must keep request id visible after truncation")
+	}
+}
+
+func TestCardResolutionHeaders(t *testing.T) {
+	argv := []string{"echo", "hi"}
+	cases := []struct {
+		verdict string
+		by      string
+		want    string
+	}{
+		{"approve", "paseo", "✅ <b>Approved via Paseo Desktop</b>"},
+		{"deny", "paseo", "❌ <b>Denied via Paseo Desktop</b>"},
+		{"approve", "telegram:alice", "✅ <b>Approved via Telegram (@alice)</b>"},
+		{"deny", "telegram:alice", "❌ <b>Denied via Telegram (@alice)</b>"},
+		{"approve", "cli", "✅ <b>Approved via CLI (cli)</b>"},
+		{"deny", "local", "❌ <b>Denied via CLI (local)</b>"},
+		{"timeout", "system", "⌛ <b>Expired — timed out</b>"},
+		{"confirmation_timeout", "system", "⌛ <b>Expired — timed out</b>"},
+		{"client_aborted", "client", "⌛ <b>Aborted — caller disconnected</b>"},
+		{"", "", "🔔 <b>Approval needed</b>"},
+		{"confirm", "paseo", "⚠️ <b>Are you sure? Tap again to run</b>"},
+	}
+	for _, tc := range cases {
+		card := Card("h", argv, 1000, "/tmp", "rid9", 60, tc.verdict, tc.by, false)
+		if !strings.Contains(card, tc.want) {
+			t.Errorf("verdict=%q by=%q: missing %q in:\n%s", tc.verdict, tc.by, tc.want, card)
+		}
+	}
+}
+
+func TestCardResolutionByEscaped(t *testing.T) {
+	card := Card("h", []string{"echo"}, 1000, "/tmp", "rid9", 60, "approve", "<b>evil</b>", false)
+	if strings.Contains(card, "<b>evil</b>") {
+		t.Errorf("approver identity must be escaped:\n%s", card)
+	}
+	if !strings.Contains(card, "CLI (&lt;b&gt;evil&lt;/b&gt;)") {
+		t.Errorf("escaped approver identity missing:\n%s", card)
 	}
 }

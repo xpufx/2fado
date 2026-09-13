@@ -1,6 +1,9 @@
 package service
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"os/user"
@@ -30,6 +33,47 @@ func testService(t *testing.T, p policy.Policy) Service {
 		Store:     st,
 		Approvers: map[string]bool{},
 		Verdicts:  make(chan telegram.Verdict, 64),
+	}
+}
+
+func TestCloseCardShowsResolutionSource(t *testing.T) {
+	var gotText string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		if strings.HasSuffix(r.URL.Path, "/editMessageText") {
+			gotText = r.Form.Get("text")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `{"ok":true,"result":{"message_id":7,"chat":{"id":1}}}`)
+	}))
+	defer ts.Close()
+
+	dir := t.TempDir()
+	svc := New(config.Conf{StateDir: dir, Timeout: 5, BotToken: "test-token"})
+	svc.TG.BaseURL = ts.URL
+	if svc.getState() != nil {
+		svc.getState().tgClient.BaseURL = ts.URL
+	}
+	if err := svc.Store.Init(); err != nil {
+		t.Fatal(err)
+	}
+	rid := "close-card-1"
+	if err := svc.Store.Save(protocol.PendingRecord{
+		Argv: []string{"/bin/echo", "hi"}, UID: 1000, Cwd: "/tmp",
+		Expires: time.Now().Add(60 * time.Second).Unix(),
+	}, rid); err != nil {
+		t.Fatal(err)
+	}
+	svc.Store.AttachPager(rid, "123", 7)
+
+	svc.closeCard(rid, protocol.RunRequest{Argv: []string{"/bin/echo", "hi"}, Cwd: "/tmp"}, 1000, "approve", "paseo")
+	if !strings.Contains(gotText, "✅ <b>Approved via Paseo Desktop</b>") {
+		t.Fatalf("closed card missing Paseo source header, got:\n%s", gotText)
+	}
+
+	svc.closeCard(rid, protocol.RunRequest{Argv: []string{"/bin/echo", "hi"}, Cwd: "/tmp"}, 1000, "deny", "telegram:alice")
+	if !strings.Contains(gotText, "❌ <b>Denied via Telegram (@alice)</b>") {
+		t.Fatalf("closed card missing Telegram source header, got:\n%s", gotText)
 	}
 }
 

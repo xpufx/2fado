@@ -246,7 +246,7 @@ func (s Service) RunWithCancel(req protocol.RunRequest, uid uint32, cancel <-cha
 	}
 	if decision == "client_aborted" {
 		s.Store.Consume(rid, decision, by)
-		s.closeCard(rid, req, uid, decision)
+		s.closeCard(rid, req, uid, decision, by)
 		s.Store.SaveResult(rid, -1, "client_aborted")
 		s.Store.Append(protocol.AuditEvent{Ev: "client_aborted", Argv: req.Argv,
 			RID: rid, Step: "initial", By: by})
@@ -255,14 +255,14 @@ func (s Service) RunWithCancel(req protocol.RunRequest, uid uint32, cancel <-cha
 	s.Store.Append(protocol.AuditEvent{Ev: "verdict", Argv: req.Argv,
 		RID: rid, Step: "initial", Decision: decision, By: by})
 	if decision != "approve" {
-		s.closeCard(rid, req, uid, decision)
+		s.closeCard(rid, req, uid, decision, by)
 		s.Store.SaveResult(rid, -1, "")
 		return protocol.RunResult{Status: "denied", Reason: decision}
 	}
 	if s.needsConfirm(req.Argv) {
 		return s.confirm(rid, req, uid, clean, by, cancel)
 	}
-	s.closeCard(rid, req, uid, decision)
+	s.closeCard(rid, req, uid, decision, by)
 	return s.runApproved(rid, req, uid, clean)
 }
 
@@ -283,7 +283,7 @@ func (s Service) runDetached(rid string, req protocol.RunRequest, uid uint32, cl
 	s.Store.Append(protocol.AuditEvent{Ev: "verdict", Argv: req.Argv,
 		RID: rid, Step: "initial", Decision: decision, By: by})
 	if decision != "approve" {
-		s.closeCard(rid, req, uid, decision)
+		s.closeCard(rid, req, uid, decision, by)
 		s.Store.SaveResult(rid, -1, "")
 		return
 	}
@@ -291,7 +291,7 @@ func (s Service) runDetached(rid string, req protocol.RunRequest, uid uint32, cl
 		s.confirm(rid, req, uid, clean, by, nil)
 		return
 	}
-	s.closeCard(rid, req, uid, decision)
+	s.closeCard(rid, req, uid, decision, by)
 	s.runApproved(rid, req, uid, clean)
 }
 
@@ -328,7 +328,7 @@ func (s Service) confirm(rid1 string, req protocol.RunRequest, uid uint32, clean
 	left := int64(s.Conf.Timeout)
 	if !s.isPlaceholder() && rec1.ChatID != "" {
 		s.activeTG().Edit(rec1.ChatID, rec1.MsgID, telegram.Card(s.Host, req.Argv,
-			uid, req.Cwd, rid, left, "confirm", s.Conf.DryRun),
+			uid, req.Cwd, rid, left, "confirm", by, s.Conf.DryRun),
 			telegram.Buttons(rid))
 	} else {
 		fmt.Printf("[pager:stdout] CONFIRM %s (confirm of %s) (approve: 2fado approve %s)\n", rid, rid1, rid)
@@ -342,7 +342,7 @@ func (s Service) confirm(rid1 string, req protocol.RunRequest, uid uint32, clean
 	}
 	if decision == "client_aborted" {
 		s.Store.Consume(rid, decision, cby)
-		s.closeCard(rid, req, uid, decision)
+		s.closeCard(rid, req, uid, decision, cby)
 		s.Store.SaveResult(rid, -1, "client_aborted")
 		s.Store.SaveResult(rid1, -1, "client_aborted")
 		s.Store.Append(protocol.AuditEvent{
@@ -357,7 +357,7 @@ func (s Service) confirm(rid1 string, req protocol.RunRequest, uid uint32, clean
 	}
 	if decision == "confirmation_timeout" || decision == "timeout" {
 		s.Store.Consume(rid, "timeout", "system")
-		s.closeCard(rid, req, uid, "timeout")
+		s.closeCard(rid, req, uid, "timeout", "system")
 		s.Store.SaveResult(rid, -1, "confirmation_timeout")
 		s.Store.SaveResult(rid1, -1, "confirmation_timeout")
 		s.Store.Append(protocol.AuditEvent{
@@ -379,7 +379,7 @@ func (s Service) confirm(rid1 string, req protocol.RunRequest, uid uint32, clean
 		Decision:  decision,
 		By:        cby,
 	})
-	s.closeCard(rid, req, uid, decision)
+	s.closeCard(rid, req, uid, decision, cby)
 	if decision != "approve" {
 		s.Store.SaveResult(rid, -1, "")
 		s.Store.SaveResult(rid1, -1, "")
@@ -414,7 +414,7 @@ func (s Service) AdoptOrphans() {
 		}
 		if rec.Expires <= now {
 			req := protocol.RunRequest{Argv: rec.Argv, Cwd: rec.Cwd, Env: map[string]string{}}
-			s.closeCard(rid, req, rec.UID, "timeout")
+			s.closeCard(rid, req, rec.UID, "timeout", "system")
 			s.Store.SaveResult(rid, -1, "timeout")
 			continue
 		}
@@ -434,7 +434,7 @@ func (s Service) adoptOne(rid string, rec protocol.PendingRecord) {
 	s.Store.Append(protocol.AuditEvent{Ev: "verdict", Argv: rec.Argv,
 		RID: rid, Step: rec.Step, Decision: decision, By: by})
 	if decision != "approve" {
-		s.closeCard(rid, req, rec.UID, decision)
+		s.closeCard(rid, req, rec.UID, decision, by)
 		s.Store.SaveResult(rid, -1, "")
 		return
 	}
@@ -443,7 +443,7 @@ func (s Service) adoptOne(rid string, rec protocol.PendingRecord) {
 		s.confirm(rid, req, rec.UID, clean, by, nil)
 		return
 	}
-	s.closeCard(rid, req, rec.UID, decision)
+	s.closeCard(rid, req, rec.UID, decision, by)
 	s.runApproved(rid, req, rec.UID, clean)
 }
 
@@ -603,7 +603,7 @@ func (s Service) activeTG() telegram.Client {
 
 func (s Service) page(rid string, req protocol.RunRequest, uid uint32) {
 	text := telegram.Card(s.Host, req.Argv, uid, req.Cwd, rid,
-		int64(s.Conf.Timeout), "", s.Conf.DryRun)
+		int64(s.Conf.Timeout), "", "", s.Conf.DryRun)
 	if s.isPlaceholder() {
 		fmt.Printf("[pager:stdout] approve: 2fado approve %s\n%s\n", rid, text)
 		return
@@ -617,7 +617,7 @@ func (s Service) page(rid string, req protocol.RunRequest, uid uint32) {
 	}
 }
 
-func (s Service) closeCard(rid string, req protocol.RunRequest, uid uint32, decision string) {
+func (s Service) closeCard(rid string, req protocol.RunRequest, uid uint32, decision string, by string) {
 	if s.isPlaceholder() {
 		return
 	}
@@ -630,7 +630,7 @@ func (s Service) closeCard(rid string, req protocol.RunRequest, uid uint32, deci
 		left = 0
 	}
 	s.activeTG().Edit(rec.ChatID, rec.MsgID, telegram.Card(s.Host, req.Argv,
-		rec.UID, rec.Cwd, rid, left, decision, s.Conf.DryRun),
+		rec.UID, rec.Cwd, rid, left, decision, by, s.Conf.DryRun),
 		telegram.EmptyButtons())
 }
 

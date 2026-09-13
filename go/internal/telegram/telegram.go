@@ -155,30 +155,51 @@ const maxCommandRunes = 1500
 // Card renders the approval request as HTML (parse_mode HTML). All
 // untrusted fields are html-escaped so embedded backticks, tags, or
 // entities cannot break out of the code block or spoof card layout.
-// Verdict is "" while pending, "confirm" for the second-step challenge.
-func Card(host string, argv []string, uid uint32, cwd, rid string, expiresIn int64, verdict string, dry bool) string {
-	var head string
-	switch verdict {
-	case "approve":
-		head = "✅ <b>Approved</b>"
-		if dry {
-			head = "✅ <b>Approved (dry run — not executed)</b>"
-		}
-	case "deny":
-		head = "❌ <b>Denied</b>"
-	case "timeout":
-		head = "⌛ <b>Expired — denied</b>"
-	case "confirm":
-		head = "⚠️ <b>Are you sure? Tap again to run</b>"
-	default:
-		head = "🔔 <b>Approval needed</b>"
-	}
+// Verdict is "" while pending, "confirm" for the second-step challenge,
+// otherwise the resolution ("approve", "deny", "timeout", ...); by names
+// the resolution source and is shown on closed cards.
+func Card(host string, argv []string, uid uint32, cwd, rid string, expiresIn int64, verdict string, by string, dry bool) string {
+	head := resolutionHead(verdict, by, dry)
 	cmd := strings.Join(argv, " ")
 	if r := []rune(cmd); len(r) > maxCommandRunes {
 		cmd = string(r[:maxCommandRunes]) + "…[truncated]"
 	}
 	return fmt.Sprintf("%s\n🖥️ host: <code>%s</code>\n👤 caller: <code>%s</code>\n📁 cwd: <code>%s</code>\n⌨️ command:\n<pre><code>%s</code></pre>\n🕒 expires in %ds · request <code>%s</code>",
 		head, html.EscapeString(host), html.EscapeString(Who(uid)), html.EscapeString(cwd), html.EscapeString(cmd), expiresIn, html.EscapeString(rid))
+}
+
+// resolutionHead renders the card header, naming the decision source on
+// closed cards so operators can see where approval came from.
+func resolutionHead(verdict, by string, dry bool) string {
+	switch verdict {
+	case "approve":
+		if dry {
+			return "✅ <b>Approved (dry run — not executed)</b>"
+		}
+		return fmt.Sprintf("✅ <b>Approved via %s</b>", html.EscapeString(sourceLabel(by)))
+	case "deny":
+		return fmt.Sprintf("❌ <b>Denied via %s</b>", html.EscapeString(sourceLabel(by)))
+	case "timeout", "confirmation_timeout":
+		return "⌛ <b>Expired — timed out</b>"
+	case "client_aborted":
+		return "⌛ <b>Aborted — caller disconnected</b>"
+	case "confirm":
+		return "⚠️ <b>Are you sure? Tap again to run</b>"
+	default:
+		return "🔔 <b>Approval needed</b>"
+	}
+}
+
+// sourceLabel maps the verdict attribution to a human channel name.
+func sourceLabel(by string) string {
+	switch {
+	case by == "paseo":
+		return "Paseo Desktop"
+	case strings.HasPrefix(by, "telegram:"):
+		return "Telegram (@" + strings.TrimPrefix(by, "telegram:") + ")"
+	default:
+		return "CLI (" + by + ")"
+	}
 }
 
 // Buttons builds the inline keyboard; exported so the service can
