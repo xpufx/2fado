@@ -6,7 +6,6 @@ import type {
 } from "@getpaseo/plugin/client";
 import { Icon, ScrollView, useToast } from "@getpaseo/plugin/client/react-native";
 import {
-  AttentionBeacon,
   Badge,
   Button,
   Card,
@@ -135,32 +134,54 @@ export function ApprovalHeaderIcon(props: PluginButtonIconProps) {
 
   useNewPendingToast(data?.items);
 
+  const prevCountRef = useRef<number | null>(null);
   useEffect(() => {
-    const reg = headerRegistry.get(workspaceId);
-    if (!reg) return;
-    reg.update({ label: count > 0 ? `Pending (${count})` : undefined });
+    if (prevCountRef.current === count) return;
+    prevCountRef.current = count;
+    // Defer the button store update out of the render/commit phase
+    const timer = setTimeout(() => {
+      const reg = headerRegistry.get(workspaceId);
+      if (!reg) return;
+      try {
+        reg.update({ label: count > 0 ? `Pending (${count})` : undefined });
+      } catch (err) {
+        console.warn("[2fado] Failed to update header button label:", err);
+      }
+    }, 0);
+    return () => clearTimeout(timer);
   }, [workspaceId, count]);
+
+  const activeColor = count > 0
+    ? hasConfirm
+      ? theme.colors.statusDanger || "#ef4444"
+      : theme.colors.statusWarning || "#f59e0b"
+    : color;
 
   return (
     <PluginThemeProvider theme={{ colors: theme.colors }}>
-      <AttentionBeacon
-        active={count > 0}
-        mode="glow"
-        tone={hasConfirm ? "danger" : "warning"}
-        style={{ overflow: "visible" }}
-      >
+      <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
         <Icon
           name="ShieldCheck"
           size={size}
-          color={
-            count > 0
-              ? hasConfirm
-                ? theme.colors.statusDanger || "#ef4444"
-                : theme.colors.statusWarning || "#f59e0b"
-              : color
-          }
+          color={activeColor}
         />
-      </AttentionBeacon>
+        {count > 0 && (
+          <View
+            pointerEvents="none"
+            style={{
+              position: "absolute",
+              top: -2,
+              right: -2,
+              width: 7,
+              height: 7,
+              borderRadius: 4,
+              backgroundColor: hasConfirm
+                ? theme.colors.statusDanger || "#ef4444"
+                : theme.colors.statusWarning || "#f59e0b",
+            }}
+          />
+        )}
+      </View>
     </PluginThemeProvider>
   );
 }
