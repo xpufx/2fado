@@ -580,7 +580,7 @@ func TestAdoptOrphansExecutesOnApproval(t *testing.T) {
 	deadline := time.Now().Add(6 * time.Second)
 	for {
 		st := svc.Store.Status(rid, time.Now().Unix())
-		if st.Status == "completed" || st.Status == "running" {
+		if st.Status == "completed" {
 			break
 		}
 		done := false
