@@ -228,6 +228,7 @@ func (s Service) RunWithCancel(req protocol.RunRequest, uid uint32, cancel <-cha
 		UID:     uid,
 		Cwd:     req.Cwd,
 		Expires: expires.Unix(),
+		Env:     clean,
 		Step:    "initial",
 		Preview: preview,
 	}, rid)
@@ -309,6 +310,7 @@ func (s Service) confirm(rid1 string, req protocol.RunRequest, uid uint32, clean
 		UID:       uid,
 		Cwd:       req.Cwd,
 		Expires:   expires.Unix(),
+		Env:       clean,
 		Step:      "confirm",
 		ConfirmOf: rid1,
 		ChatID:    rec1.ChatID,
@@ -421,7 +423,7 @@ func (s Service) AdoptOrphans() {
 }
 
 func (s Service) adoptOne(rid string, rec protocol.PendingRecord) {
-	req := protocol.RunRequest{Argv: rec.Argv, Cwd: rec.Cwd, Env: map[string]string{}}
+	req := protocol.RunRequest{Argv: rec.Argv, Cwd: rec.Cwd, Env: rec.Env}
 	v := s.await(rid, time.Unix(rec.Expires, 0), nil)
 	decision := "timeout"
 	by := "system"

@@ -186,15 +186,16 @@ type VerdictAck struct {
 // PendingRecord is the authoritative stored request. Execution reads only
 // this — never anything that crossed a wire.
 type PendingRecord struct {
-	Argv      []string       `json:"argv"`
-	UID       uint32         `json:"uid"`
-	Cwd       string         `json:"cwd"`
-	Expires   int64          `json:"expires"`
-	ChatID    string         `json:"chat_id,omitempty"`
-	MsgID     int64          `json:"message_id,omitempty"`
-	Step      string         `json:"step,omitempty"`
-	ConfirmOf string         `json:"confirm_of,omitempty"`
-	Preview   *PreviewRecord `json:"preview,omitempty"`
+	Argv      []string          `json:"argv"`
+	UID       uint32            `json:"uid"`
+	Cwd       string            `json:"cwd"`
+	Expires   int64             `json:"expires"`
+	Env       map[string]string `json:"env,omitempty"`
+	ChatID    string            `json:"chat_id,omitempty"`
+	MsgID     int64             `json:"message_id,omitempty"`
+	Step      string            `json:"step,omitempty"`
+	ConfirmOf string            `json:"confirm_of,omitempty"`
+	Preview   *PreviewRecord    `json:"preview,omitempty"`
 }
 
 // VerdictRecord is written once, atomically (O_EXCL): one verdict wins.

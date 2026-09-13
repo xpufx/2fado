@@ -2,9 +2,11 @@ package service
 
 import (
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -763,5 +765,56 @@ func TestPolicyMutationRejectsUnprivilegedUID(t *testing.T) {
 	cfgRes := svc.TelegramSetConfig(protocol.TelegramSetConfigRequest{}, uid)
 	if cfgRes.Success || cfgRes.Error != "unauthorized" {
 		t.Fatalf("unauthorized telegram_set_config = %+v, want rejection", cfgRes)
+	}
+}
+
+func TestAdoptOrphansPreservesEnv(t *testing.T) {
+	printenv, err := exec.LookPath("printenv")
+	if err != nil {
+		t.Skip("printenv not available")
+	}
+	svc := testService(t, policy.Policy{Default: "ask", EnvKeep: []string{"TWOFADO_ORPHAN_MARKER"}})
+	svc.Conf.Timeout = 10
+
+	rid := "orphan-env-1"
+	rec := protocol.PendingRecord{
+		Argv:    []string{printenv, "TWOFADO_ORPHAN_MARKER"},
+		UID:     uint32(os.Getuid()),
+		Cwd:     t.TempDir(),
+		Expires: time.Now().Add(8 * time.Second).Unix(),
+		Env:     map[string]string{"TWOFADO_ORPHAN_MARKER": "adopted-env-ok", "PATH": "/usr/bin:/bin"},
+		Step:    "initial",
+	}
+	if err := svc.Store.Save(rec, rid); err != nil {
+		t.Fatal(err)
+	}
+
+	svc.AdoptOrphans()
+
+	if !svc.Store.Consume(rid, "approve", "operator") {
+		t.Fatal("failed to consume orphan approval")
+	}
+
+	deadline := time.Now().Add(6 * time.Second)
+	for {
+		found := false
+		for _, it := range svc.Store.Recent(10) {
+			if it.ID == rid {
+				found = true
+				if it.Exit == 0 && strings.Contains(it.Output, "adopted-env-ok") {
+					return
+				}
+				if it.Exit != 0 && it.Output != "" {
+					t.Fatalf("orphan executed without preserved env: exit=%d out=%q", it.Exit, it.Output)
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			if !found {
+				t.Fatal("orphan petition produced no result after approval")
+			}
+			t.Fatal("orphan result missing preserved env marker")
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }

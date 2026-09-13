@@ -85,6 +85,55 @@ func (s Store) Consume(rid, decision, by string) bool {
 	return err == nil
 }
 
+// DefaultPruneTTL is the retention window for decided or expired records.
+const DefaultPruneTTL = 24 * time.Hour
+
+// Prune deletes decided (.verdict) or expired records older than the TTL,
+// keeping live undecided, unexpired petitions. Returns the purge count.
+func (s Store) Prune(olderThan time.Duration) (int, error) {
+	entries, err := os.ReadDir(s.Pending)
+	if err != nil {
+		return 0, err
+	}
+	now := time.Now()
+	seen := map[string]bool{}
+	purged := 0
+	for _, e := range entries {
+		name := e.Name()
+		var rid string
+		switch {
+		case strings.HasSuffix(name, ".json"):
+			rid = strings.TrimSuffix(name, ".json")
+		case strings.HasSuffix(name, ".verdict"), strings.HasSuffix(name, ".result"):
+			dot := strings.LastIndex(name, ".")
+			rid = name[:dot]
+		default:
+			continue
+		}
+		if seen[rid] {
+			continue
+		}
+		seen[rid] = true
+		rec, err := s.Load(rid)
+		if err == nil && s.Verdict(rid) == nil && rec.Expires > now.Unix() {
+			continue
+		}
+		oldest := now
+		for _, suf := range []string{".json", ".verdict", ".result"} {
+			if fi, err := os.Stat(filepath.Join(s.Pending, rid+suf)); err == nil {
+				if fi.ModTime().Before(oldest) {
+					oldest = fi.ModTime()
+				}
+			}
+		}
+		if now.Sub(oldest) > olderThan {
+			_ = s.Purge(rid)
+			purged++
+		}
+	}
+	return purged, nil
+}
+
 // Purge deletes all on-disk artifacts for a request ID.
 func (s Store) Purge(rid string) error {
 	_ = os.Remove(s.pendingPath(rid))

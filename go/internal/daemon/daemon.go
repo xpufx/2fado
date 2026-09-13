@@ -18,6 +18,7 @@ import (
 
 	"2fado/internal/protocol"
 	"2fado/internal/service"
+	"2fado/internal/store"
 )
 
 var (
@@ -95,6 +96,9 @@ func Serve(svc service.Service) error {
 	svc.StartTelegram(ctx)
 	go svc.TelegramPump()
 	go svc.AdoptOrphans()
+	if n, err := svc.Store.Prune(store.DefaultPruneTTL); err == nil && n > 0 {
+		fmt.Printf("2fadod: pruned %d stale petition records\n", n)
+	}
 	fmt.Printf("2fadod listening on %s (state %s)\n", svc.Conf.Socket, svc.Conf.StateDir)
 	for {
 		c, err := l.Accept()
