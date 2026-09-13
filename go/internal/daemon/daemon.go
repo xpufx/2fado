@@ -116,9 +116,10 @@ func handle(svc *service.Service, c net.Conn) {
 		return
 	}
 	var out []byte
+	uid := peerUID(c)
 	switch {
 	case msg.Verdict != nil:
-		ack := svc.Submit(*msg.Verdict)
+		ack := svc.Submit(*msg.Verdict, uid)
 		out, _ = json.Marshal(ack)
 	case msg.Run != nil:
 		disconnect := make(chan struct{})
@@ -139,9 +140,9 @@ func handle(svc *service.Service, c net.Conn) {
 	case msg.TelegramInfo != nil:
 		out, _ = json.Marshal(svc.TelegramInfo())
 	case msg.TelegramSetConfig != nil:
-		out, _ = json.Marshal(svc.TelegramSetConfig(*msg.TelegramSetConfig))
+		out, _ = json.Marshal(svc.TelegramSetConfig(*msg.TelegramSetConfig, uid))
 	case msg.PolicyAddRule != nil:
-		out, _ = json.Marshal(svc.PolicyAddRule(*msg.PolicyAddRule))
+		out, _ = json.Marshal(svc.PolicyAddRule(*msg.PolicyAddRule, uid))
 	case msg.Version != nil:
 		out, _ = json.Marshal(protocol.VersionResponse{
 			Version:      daemonVersion,

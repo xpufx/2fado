@@ -179,7 +179,8 @@ type RunResult struct {
 
 // VerdictAck answers a verdict submission.
 type VerdictAck struct {
-	Recorded bool `json:"recorded"`
+	Recorded bool   `json:"recorded"`
+	Error    string `json:"error,omitempty"`
 }
 
 // PendingRecord is the authoritative stored request. Execution reads only

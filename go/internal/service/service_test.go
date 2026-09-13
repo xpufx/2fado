@@ -474,7 +474,7 @@ func TestPolicyAddRuleLiveReload(t *testing.T) {
 	}
 	res := svc.PolicyAddRule(protocol.PolicyAddRuleRequest{
 		Target: "whitelist", MatchType: "exact", Pattern: []string{"/bin/true"},
-	})
+	}, uint32(os.Getuid()))
 	if !res.Success {
 		t.Fatalf("PolicyAddRule failed: %s", res.Error)
 	}
@@ -484,7 +484,7 @@ func TestPolicyAddRuleLiveReload(t *testing.T) {
 	}
 	res = svc.PolicyAddRule(protocol.PolicyAddRuleRequest{
 		Target: "blacklist", MatchType: "base", Pattern: []string{"/bin/echo"},
-	})
+	}, uint32(os.Getuid()))
 	if !res.Success {
 		t.Fatalf("PolicyAddRule base failed: %s", res.Error)
 	}
@@ -494,7 +494,7 @@ func TestPolicyAddRuleLiveReload(t *testing.T) {
 	}
 	res = svc.PolicyAddRule(protocol.PolicyAddRuleRequest{
 		Target: "blacklist", MatchType: "custom", Pattern: []string{"/bin/ls", "*"},
-	})
+	}, uint32(os.Getuid()))
 	if !res.Success {
 		t.Fatalf("PolicyAddRule custom failed: %s", res.Error)
 	}
@@ -502,7 +502,7 @@ func TestPolicyAddRuleLiveReload(t *testing.T) {
 	if got.Status != "denied" {
 		t.Fatalf("after blacklist custom rule: Run = %+v, want denied", got)
 	}
-	bad := svc.PolicyAddRule(protocol.PolicyAddRuleRequest{Target: "nope", MatchType: "exact", Pattern: []string{"/bin/x"}})
+	bad := svc.PolicyAddRule(protocol.PolicyAddRuleRequest{Target: "nope", MatchType: "exact", Pattern: []string{"/bin/x"}}, uint32(os.Getuid()))
 	if bad.Success {
 		t.Error("bad target must fail")
 	}
@@ -690,5 +690,78 @@ func TestExecuteUnknownTargetUserFailsClean(t *testing.T) {
 	code, out, _ := svc.Execute([]string{"/bin/true"}, t.TempDir(), map[string]string{})
 	if code == 0 {
 		t.Errorf("expected failure for unknown target user, got exit 0 (out=%q)", out)
+	}
+}
+
+func unprivilegedUID() uint32 {
+	self := uint32(os.Getuid())
+	for _, c := range []uint32{65000, 65001, nobodyUID(), 1} {
+		if c != 0 && c != self {
+			return c
+		}
+	}
+	return self + 1
+}
+
+func nobodyUID() uint32 {
+	u, err := user.Lookup("nobody")
+	if err != nil {
+		return 65534
+	}
+	n, _ := strconv.Atoi(u.Uid)
+	return uint32(n)
+}
+
+func TestSubmitRejectsUnprivilegedUID(t *testing.T) {
+	svc := testService(t, policy.Policy{Default: "ask"})
+	uid := unprivilegedUID()
+	ack := svc.Submit(protocol.VerdictSubmit{ID: "rid-x", Decision: "approve", By: "spoofed"}, uid)
+	if ack.Recorded || ack.Error != "unauthorized" {
+		t.Fatalf("unauthorized verdict = %+v, want rejection", ack)
+	}
+}
+
+func TestSubmitAllowsOperatorUID(t *testing.T) {
+	svc := testService(t, policy.Policy{Default: "ask"})
+	rid := "auth-ok-1"
+	if err := svc.Store.Save(protocol.PendingRecord{
+		Argv: []string{"/bin/echo", "hi"}, UID: 1000, Cwd: t.TempDir(),
+		Expires: time.Now().Add(30 * time.Second).Unix(),
+	}, rid); err != nil {
+		t.Fatal(err)
+	}
+	ack := svc.Submit(protocol.VerdictSubmit{ID: rid, Decision: "approve", By: "op"}, uint32(os.Getuid()))
+	if !ack.Recorded || ack.Error != "" {
+		t.Fatalf("operator verdict = %+v, want recorded", ack)
+	}
+}
+
+func TestPolicyMutationRejectsUnprivilegedUID(t *testing.T) {
+	dir := t.TempDir()
+	policyPath := filepath.Join(dir, "policy.json")
+	if err := os.WriteFile(policyPath, []byte(`{"mode":"blacklist","default":"ask"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st := store.New(dir)
+	if err := st.Init(); err != nil {
+		t.Fatal(err)
+	}
+	svc := Service{
+		Conf:      config.Conf{StateDir: dir, Timeout: 5, Policy: policyPath},
+		Policy:    policy.Load(policyPath),
+		Store:     st,
+		Approvers: map[string]bool{},
+		Verdicts:  make(chan telegram.Verdict, 64),
+	}
+	uid := unprivilegedUID()
+	addRes := svc.PolicyAddRule(protocol.PolicyAddRuleRequest{
+		Target: "whitelist", MatchType: "exact", Pattern: []string{"/bin/bash"},
+	}, uid)
+	if addRes.Success || addRes.Error != "unauthorized" {
+		t.Fatalf("unauthorized policy_add_rule = %+v, want rejection", addRes)
+	}
+	cfgRes := svc.TelegramSetConfig(protocol.TelegramSetConfigRequest{}, uid)
+	if cfgRes.Success || cfgRes.Error != "unauthorized" {
+		t.Fatalf("unauthorized telegram_set_config = %+v, want rejection", cfgRes)
 	}
 }

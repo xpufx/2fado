@@ -88,6 +88,10 @@ func Verdict(sock, decision, id string) int {
 		fmt.Fprintln(os.Stderr, "2fado: bad reply")
 		return 1
 	}
+	if ack.Error != "" {
+		fmt.Fprintf(os.Stderr, "2fado: verdict rejected (%s)\n", ack.Error)
+		return 1
+	}
 	fmt.Printf("{recorded: %v}\n", ack.Recorded)
 	return 0
 }

@@ -469,13 +469,27 @@ func (s Service) Status(id string) protocol.StatusResponse {
 }
 
 // Submit records a local verdict (PoC path; production: SSO-bound UI).
-func (s Service) Submit(sub protocol.VerdictSubmit) protocol.VerdictAck {
+// Only the daemon's own UID or root may submit; all others are rejected
+// and logged.
+func (s Service) Submit(sub protocol.VerdictSubmit, callerUID uint32) protocol.VerdictAck {
+	if !isAdminUID(callerUID) {
+		s.Store.Append(protocol.AuditEvent{Ev: "verdict_unauthorized", By: cleanBy(sub.By),
+			Argv: nil, RID: sub.ID, Decision: sub.Decision})
+		return protocol.VerdictAck{Error: "unauthorized"}
+	}
 	if sub.Decision != "approve" && sub.Decision != "deny" {
 		return protocol.VerdictAck{Recorded: false}
 	}
 	return protocol.VerdictAck{
 		Recorded: s.Store.Consume(sub.ID, sub.Decision, cleanBy(sub.By)),
 	}
+}
+
+// isAdminUID reports whether callerUID may issue verdicts or mutate
+// policy/config: root, or the UID the daemon itself runs as (local
+// operator over the unix socket).
+func isAdminUID(callerUID uint32) bool {
+	return callerUID == 0 || callerUID == uint32(os.Getuid())
 }
 
 // cleanBy keeps attribution honest: a tight charset, capped length,
@@ -702,7 +716,11 @@ func (s Service) TelegramInfo() protocol.TelegramInfoResponse {
 }
 
 // TelegramSetConfig updates and persists Telegram configuration, live-reloading polling.
-func (s Service) TelegramSetConfig(req protocol.TelegramSetConfigRequest) protocol.TelegramSetConfigResponse {
+func (s Service) TelegramSetConfig(req protocol.TelegramSetConfigRequest, callerUID uint32) protocol.TelegramSetConfigResponse {
+	if !isAdminUID(callerUID) {
+		s.Store.Append(protocol.AuditEvent{Ev: "config_unauthorized"})
+		return protocol.TelegramSetConfigResponse{Success: false, Error: "unauthorized"}
+	}
 	if s.state == nil {
 		return protocol.TelegramSetConfigResponse{Success: false, Error: "service uninitialized"}
 	}
@@ -802,7 +820,11 @@ func (s Service) TelegramPump() {
 }
 
 // PolicyAddRule persists a whitelist/blacklist rule and reloads it live.
-func (s *Service) PolicyAddRule(req protocol.PolicyAddRuleRequest) protocol.PolicyAddRuleResponse {
+func (s *Service) PolicyAddRule(req protocol.PolicyAddRuleRequest, callerUID uint32) protocol.PolicyAddRuleResponse {
+	if !isAdminUID(callerUID) {
+		s.Store.Append(protocol.AuditEvent{Ev: "policy_unauthorized"})
+		return protocol.PolicyAddRuleResponse{Success: false, Error: "unauthorized"}
+	}
 	p, n, err := policy.AddRule(s.Conf.Policy, req.Target, req.MatchType, req.Pattern)
 	if err != nil {
 		return protocol.PolicyAddRuleResponse{Success: false, Error: err.Error()}

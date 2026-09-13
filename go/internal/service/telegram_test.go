@@ -77,7 +77,7 @@ func TestTelegramSetConfigAndInfoLifecycle(t *testing.T) {
 		BotToken:  ptr("bad-token"),
 		ChatID:    "123",
 		Approvers: []string{"admin"},
-	})
+	}, uint32(os.Getuid()))
 	if badRes.Success {
 		t.Fatal("expected failure for bad token, got success")
 	}
@@ -90,7 +90,7 @@ func TestTelegramSetConfigAndInfoLifecycle(t *testing.T) {
 		BotToken:  ptr("valid-token"),
 		ChatID:    "-100987654",
 		Approvers: []string{"111", "222"},
-	})
+	}, uint32(os.Getuid()))
 	if !goodRes.Success {
 		t.Fatalf("TelegramSetConfig failed: %s", goodRes.Error)
 	}
@@ -130,7 +130,7 @@ func TestTelegramSetConfigAndInfoLifecycle(t *testing.T) {
 		BotToken:  ptr(""),
 		ChatID:    "",
 		Approvers: []string{},
-	})
+	}, uint32(os.Getuid()))
 	if !clearRes.Success {
 		t.Fatalf("failed to unconfigure: %s", clearRes.Error)
 	}
