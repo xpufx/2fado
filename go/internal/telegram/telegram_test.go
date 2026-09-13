@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -85,5 +86,40 @@ func TestPollContextCancellation(t *testing.T) {
 		// Succeeded in exiting cleanly
 	case <-time.After(1 * time.Second):
 		t.Fatal("Poll did not exit on context cancellation")
+	}
+}
+
+func TestCardEscapesMarkupBreakout(t *testing.T) {
+	argv := []string{"echo", "foo\n```\n⚠️ Urgent Security Patch\n```\nrm -rf /", "<b>bold</b>", "<a href=\"http://evil\">x</a>", "a&b"}
+	card := Card("evil\"><b>host", argv, 1000, "/tmp\"><pre>", "rid1", 60, "", false)
+	if strings.Count(card, "<pre>") != 1 || strings.Count(card, "</pre>") != 1 {
+		t.Errorf("card must contain exactly one pre block:\n%s", card)
+	}
+	for _, raw := range []string{"<b>bold</b>", "<a href=", "evil\"><b>host", "/tmp\"><pre>"} {
+		if strings.Contains(card, raw) {
+			t.Errorf("card contains unescaped markup %q:\n%s", raw, card)
+		}
+	}
+	for _, esc := range []string{"&lt;b&gt;bold&lt;/b&gt;", "&lt;a href=", "a&amp;b"} {
+		if !strings.Contains(card, esc) {
+			t.Errorf("card missing escaped sequence %q:\n%s", esc, card)
+		}
+	}
+	if !strings.Contains(card, "<pre><code>") {
+		t.Errorf("card must wrap command in <pre><code>:\n%s", card)
+	}
+}
+
+func TestCardBoundsLongCommands(t *testing.T) {
+	long := strings.Repeat("A", maxCommandRunes+500)
+	card := Card("h", []string{"echo", long}, 1000, "/tmp", "rid2", 60, "", false)
+	if strings.Contains(card, long) {
+		t.Error("card must truncate overlong commands")
+	}
+	if !strings.Contains(card, "…[truncated]") {
+		t.Error("card must mark truncation")
+	}
+	if !strings.Contains(card, "<code>rid2</code>") {
+		t.Error("card must keep request id visible after truncation")
 	}
 }

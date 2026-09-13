@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/http"
 	"net/url"
 	"os/user"
@@ -147,27 +148,37 @@ func Who(uid uint32) string {
 	return fmt.Sprintf("uid %d", uid)
 }
 
-// Card renders the approval request. Verdict is "" while pending,
-// "confirm" for the second-step challenge.
+// maxCommandRunes bounds the rendered command so overlong arguments
+// cannot push the request id or buttons out of view.
+const maxCommandRunes = 1500
+
+// Card renders the approval request as HTML (parse_mode HTML). All
+// untrusted fields are html-escaped so embedded backticks, tags, or
+// entities cannot break out of the code block or spoof card layout.
+// Verdict is "" while pending, "confirm" for the second-step challenge.
 func Card(host string, argv []string, uid uint32, cwd, rid string, expiresIn int64, verdict string, dry bool) string {
 	var head string
 	switch verdict {
 	case "approve":
-		head = "✅ *Approved*"
+		head = "✅ <b>Approved</b>"
 		if dry {
-			head = "✅ *Approved (dry run — not executed)*"
+			head = "✅ <b>Approved (dry run — not executed)</b>"
 		}
 	case "deny":
-		head = "❌ *Denied*"
+		head = "❌ <b>Denied</b>"
 	case "timeout":
-		head = "⌛ *Expired — denied*"
+		head = "⌛ <b>Expired — denied</b>"
 	case "confirm":
-		head = "⚠️ *Are you sure? Tap again to run*"
+		head = "⚠️ <b>Are you sure? Tap again to run</b>"
 	default:
-		head = "🔔 *Approval needed*"
+		head = "🔔 <b>Approval needed</b>"
 	}
-	return fmt.Sprintf("%s\n🖥️ host: `%s`\n👤 caller: `%s`\n📁 cwd: `%s`\n⌨️ command:\n```\n%s\n```\n🕒 expires in %ds · request `%s`",
-		head, host, Who(uid), cwd, strings.Join(argv, " "), expiresIn, rid)
+	cmd := strings.Join(argv, " ")
+	if r := []rune(cmd); len(r) > maxCommandRunes {
+		cmd = string(r[:maxCommandRunes]) + "…[truncated]"
+	}
+	return fmt.Sprintf("%s\n🖥️ host: <code>%s</code>\n👤 caller: <code>%s</code>\n📁 cwd: <code>%s</code>\n⌨️ command:\n<pre><code>%s</code></pre>\n🕒 expires in %ds · request <code>%s</code>",
+		head, html.EscapeString(host), html.EscapeString(Who(uid)), html.EscapeString(cwd), html.EscapeString(cmd), expiresIn, html.EscapeString(rid))
 }
 
 // Buttons builds the inline keyboard; exported so the service can
@@ -189,7 +200,7 @@ func (c Client) Send(chatID, text, rid string) (int64, error) {
 	body, err := c.call("sendMessage", url.Values{
 		"chat_id":      {chatID},
 		"text":         {text},
-		"parse_mode":   {"Markdown"},
+		"parse_mode":   {"HTML"},
 		"reply_markup": {keyboard(rid)},
 	})
 	if err != nil {
@@ -216,7 +227,7 @@ func (c Client) Edit(chatID string, msgID int64, text, markup string) {
 		"chat_id":      {chatID},
 		"message_id":   {strconv.FormatInt(msgID, 10)},
 		"text":         {text},
-		"parse_mode":   {"Markdown"},
+		"parse_mode":   {"HTML"},
 		"reply_markup": {markup},
 	})
 }
