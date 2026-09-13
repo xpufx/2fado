@@ -42,6 +42,7 @@ func (s Store) Save(rec protocol.PendingRecord, rid string) error {
 	if err != nil {
 		return err
 	}
+	_ = os.MkdirAll(s.Pending, 0o755)
 	return os.WriteFile(s.pendingPath(rid), data, 0o600)
 }
 
