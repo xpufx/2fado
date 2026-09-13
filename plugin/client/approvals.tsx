@@ -211,22 +211,6 @@ export function ApprovalHeaderIcon(props: PluginButtonIconProps) {
           size={size}
           color={activeColor}
         />
-        {count > 0 && (
-          <View
-            pointerEvents="none"
-            style={{
-              position: "absolute",
-              top: -2,
-              right: -2,
-              width: 7,
-              height: 7,
-              borderRadius: 4,
-              backgroundColor: hasConfirm
-                ? theme.colors.statusDanger || "#ef4444"
-                : theme.colors.statusWarning || "#f59e0b",
-            }}
-          />
-        )}
       </Animated.View>
     </PluginThemeProvider>
   );
