@@ -24,7 +24,7 @@ import {
 } from "paseo-plugin-helper/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { Platform, Pressable, Text, View } from "react-native";
+import { Platform, Pressable, Text, View, Animated, Easing } from "react-native";
 import {
   approvalSettings,
   approvalStatus,
@@ -135,20 +135,66 @@ export function ApprovalHeaderIcon(props: PluginButtonIconProps) {
   useNewPendingToast(data?.items);
 
   const prevCountRef = useRef<number | null>(null);
+  const pulse = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (count === 0) {
+      pulse.setValue(1);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 0.45,
+          duration: 900,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 900,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [count, pulse]);
+
   useEffect(() => {
     if (prevCountRef.current === count) return;
     prevCountRef.current = count;
     // Defer the button store update out of the render/commit phase
+    let interval: ReturnType<typeof setInterval> | undefined;
     const timer = setTimeout(() => {
       const reg = headerRegistry.get(workspaceId);
       if (!reg) return;
-      try {
-        reg.update({ label: count > 0 ? `Pending (${count})` : undefined });
-      } catch (err) {
-        console.warn("[2fado] Failed to update header button label:", err);
+      const show = (label: string | undefined) => {
+        try {
+          reg.update({ label });
+        } catch (err) {
+          console.warn("[2fado] Failed to update header button label:", err);
+        }
+      };
+      if (count === 0) {
+        show(undefined);
+        return;
       }
+      const unit = `Pending (${count})  •  2fado  •  `;
+      const track = unit.repeat(3);
+      const width = unit.length;
+      let offset = 0;
+      show(unit);
+      interval = setInterval(() => {
+        offset = (offset + 1) % unit.length;
+        show(track.slice(offset, offset + width));
+      }, 400);
     }, 0);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      if (interval) clearInterval(interval);
+    };
   }, [workspaceId, count]);
 
   const activeColor = count > 0
@@ -159,7 +205,7 @@ export function ApprovalHeaderIcon(props: PluginButtonIconProps) {
 
   return (
     <PluginThemeProvider theme={{ colors: theme.colors }}>
-      <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
+      <Animated.View style={{ width: size, height: size, alignItems: "center", justifyContent: "center", opacity: pulse }}>
         <Icon
           name="ShieldCheck"
           size={size}
@@ -181,7 +227,7 @@ export function ApprovalHeaderIcon(props: PluginButtonIconProps) {
             }}
           />
         )}
-      </View>
+      </Animated.View>
     </PluginThemeProvider>
   );
 }
