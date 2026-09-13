@@ -66,6 +66,20 @@ func (s Store) AttachPager(rid, chat string, msgID int64) {
 	_ = s.Save(rec, rid)
 }
 
+// SetAuthURL records an interactive WebAuthn/2FA challenge URL detected
+// during execution. First URL wins; later detections are ignored.
+func (s Store) SetAuthURL(rid, authURL string) {
+	if authURL == "" {
+		return
+	}
+	rec, err := s.Load(rid)
+	if err != nil || rec.AuthURL != "" {
+		return
+	}
+	rec.AuthURL = authURL
+	_ = s.Save(rec, rid)
+}
+
 // Consume writes the verdict exactly once (O_EXCL): one verdict wins.
 func (s Store) Consume(rid, decision, by string) bool {
 	data, err := json.Marshal(protocol.VerdictRecord{
@@ -199,6 +213,7 @@ func (s Store) List(now int64) []protocol.PendingItem {
 			Step:      step,
 			ConfirmOf: rec.ConfirmOf,
 			Preview:   rec.Preview,
+			AuthURL:   rec.AuthURL,
 		})
 	}
 	return out
@@ -308,6 +323,7 @@ func (s Store) Recent(limit int) []protocol.RecentItem {
 			Output:    output,
 			Step:      step,
 			ConfirmOf: rec.ConfirmOf,
+			AuthURL:   rec.AuthURL,
 		})
 	}
 	if out == nil {
@@ -340,6 +356,7 @@ func (s Store) Status(rid string, now int64) protocol.StatusResponse {
 				Step:      step,
 				ConfirmOf: rec.ConfirmOf,
 				Preview:   rec.Preview,
+				AuthURL:   rec.AuthURL,
 			}
 		}
 		return protocol.StatusResponse{
@@ -352,6 +369,7 @@ func (s Store) Status(rid string, now int64) protocol.StatusResponse {
 			Step:      step,
 			ConfirmOf: rec.ConfirmOf,
 			Preview:   rec.Preview,
+			AuthURL:   rec.AuthURL,
 		}
 	}
 
@@ -380,6 +398,7 @@ func (s Store) Status(rid string, now int64) protocol.StatusResponse {
 						Step:      step,
 						ConfirmOf: rec.ConfirmOf,
 						Preview:   rec.Preview,
+						AuthURL:   rec.AuthURL,
 					}
 				}
 			}
@@ -395,6 +414,7 @@ func (s Store) Status(rid string, now int64) protocol.StatusResponse {
 				Step:      step,
 				ConfirmOf: rec.ConfirmOf,
 				Preview:   rec.Preview,
+				AuthURL:   rec.AuthURL,
 			}
 		}
 		return protocol.StatusResponse{
@@ -409,6 +429,7 @@ func (s Store) Status(rid string, now int64) protocol.StatusResponse {
 			Step:      step,
 			ConfirmOf: rec.ConfirmOf,
 			Preview:   rec.Preview,
+			AuthURL:   rec.AuthURL,
 		}
 	}
 
@@ -457,6 +478,7 @@ func (s Store) Status(rid string, now int64) protocol.StatusResponse {
 		Step:      step,
 		ConfirmOf: rec.ConfirmOf,
 		Preview:   rec.Preview,
+		AuthURL:   rec.AuthURL,
 	}
 }
 

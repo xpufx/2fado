@@ -216,14 +216,42 @@ func keyboard(rid string) string {
 	return string(kb)
 }
 
+// AuthButtons builds an inline keyboard with a single URL button opening
+// the registry's WebAuthn/2FA ceremony page. URL buttons carry no callback
+// data and grant the bot nothing; the operator authenticates directly with
+// the registry in their own browser.
+func AuthButtons(authURL string) string {
+	kb, _ := json.Marshal(struct {
+		Buttons [][]struct {
+			Text string `json:"text"`
+			URL  string `json:"url"`
+		} `json:"inline_keyboard"`
+	}{Buttons: [][]struct {
+		Text string `json:"text"`
+		URL  string `json:"url"`
+	}{{{Text: "🔑 Open WebAuthn Verification", URL: authURL}}}})
+	return string(kb)
+}
+
 // Send posts the card, returns the message id for later rewriting.
 func (c Client) Send(chatID, text, rid string) (int64, error) {
-	body, err := c.call("sendMessage", url.Values{
+	return c.SendWithMarkup(chatID, text, 0, keyboard(rid))
+}
+
+// SendWithMarkup posts text with caller-supplied inline markup, threading
+// it as a reply to replyTo when nonzero (used for 2FA challenge alerts
+// attached to the approval card thread).
+func (c Client) SendWithMarkup(chatID, text string, replyTo int64, markup string) (int64, error) {
+	v := url.Values{
 		"chat_id":      {chatID},
 		"text":         {text},
 		"parse_mode":   {"HTML"},
-		"reply_markup": {keyboard(rid)},
-	})
+		"reply_markup": {markup},
+	}
+	if replyTo != 0 {
+		v.Set("reply_to_message_id", strconv.FormatInt(replyTo, 10))
+	}
+	body, err := c.call("sendMessage", v)
 	if err != nil {
 		return 0, err
 	}

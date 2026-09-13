@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/user"
@@ -159,6 +160,13 @@ func resolveCredential(uid uint32) (*syscall.Credential, error) {
 // Callers pass the stored record fields — never wire content.
 // Dry-run short-circuits before any spawn: nothing executes, exit 0.
 func (s Service) Execute(argv []string, cwd string, env map[string]string) (code int, out string, asUID uint32) {
+	return s.ExecuteWithChallenge(argv, cwd, env, nil)
+}
+
+// ExecuteWithChallenge runs argv like Execute while streaming stdout and
+// stderr through a challenge-URL scanner. onAuth fires once with the first
+// detected WebAuthn/2FA verification URL, if any.
+func (s Service) ExecuteWithChallenge(argv []string, cwd string, env map[string]string, onAuth func(string)) (code int, out string, asUID uint32) {
 	if s.Conf.DryRun {
 		return 0, "would have run: " + strings.Join(argv, " "), uint32(os.Geteuid())
 	}
@@ -180,8 +188,12 @@ func (s Service) Execute(argv []string, cwd string, env map[string]string) (code
 		}
 	}
 	var b bytes.Buffer
-	cmd.Stdout = &b
-	cmd.Stderr = &b
+	out2 := io.Writer(&b)
+	if onAuth != nil {
+		out2 = challengeScanner(&b, onAuth)
+	}
+	cmd.Stdout = out2
+	cmd.Stderr = out2
 	err = cmd.Run()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
@@ -391,11 +403,34 @@ func (s Service) confirm(rid1 string, req protocol.RunRequest, uid uint32, clean
 }
 
 func (s Service) runApproved(rid string, req protocol.RunRequest, uid uint32, clean map[string]string) protocol.RunResult {
-	code, out, asUID := s.Execute(req.Argv, req.Cwd, clean)
+	code, out, asUID := s.ExecuteWithChallenge(req.Argv, req.Cwd, clean, func(authURL string) {
+		s.Store.SetAuthURL(rid, authURL)
+		s.notifyAuthURL(rid, req, authURL)
+	})
 	s.Store.Append(protocol.AuditEvent{Ev: "exec", Argv: req.Argv,
 		RID: rid, AsUID: asUID, Exit: code, Dry: s.Conf.DryRun})
 	s.Store.SaveResult(rid, code, out)
 	return protocol.RunResult{Status: "allowed", Exit: code, Output: out}
+}
+
+// notifyAuthURL surfaces an interactive WebAuthn/2FA verification link to
+// the operator: on the Telegram card thread when one was posted, stdout
+// otherwise. The agent never sees credentials; only the link to the
+// registry's own ceremony page.
+func (s Service) notifyAuthURL(rid string, req protocol.RunRequest, authURL string) {
+	if s.isPlaceholder() {
+		fmt.Printf("[pager:stdout] auth required for %s: %s\n", rid, authURL)
+		return
+	}
+	rec, err := s.Store.Load(rid)
+	if err != nil || rec.ChatID == "" {
+		fmt.Printf("[pager:stdout] auth required for %s: %s\n", rid, authURL)
+		return
+	}
+	s.activeTG().SendWithMarkup(rec.ChatID,
+		fmt.Sprintf("🔑 <b>Biometric 2FA required</b> for request <code>%s</code>:\n%s",
+			rid, authURL),
+		rec.MsgID, telegram.AuthButtons(authURL))
 }
 
 // AdoptOrphans re-attaches waiters to petitions persisted on disk that lost

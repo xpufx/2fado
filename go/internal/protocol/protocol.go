@@ -122,6 +122,7 @@ type StatusResponse struct {
 	Step      string         `json:"step,omitempty"`
 	ConfirmOf string         `json:"confirm_of,omitempty"`
 	Preview   *PreviewRecord `json:"preview,omitempty"`
+	AuthURL   string         `json:"auth_url,omitempty"`
 }
 
 // ListRequest asks for pending records (plugin server polls this).
@@ -137,6 +138,7 @@ type PendingItem struct {
 	Step      string         `json:"step,omitempty"`
 	ConfirmOf string         `json:"confirm_of,omitempty"`
 	Preview   *PreviewRecord `json:"preview,omitempty"`
+	AuthURL   string         `json:"auth_url,omitempty"`
 }
 
 // PendingList answers ListRequest: unexpired, undecided records only.
@@ -161,6 +163,7 @@ type RecentItem struct {
 	Output    string   `json:"output,omitempty"`
 	Step      string   `json:"step,omitempty"`
 	ConfirmOf string   `json:"confirm_of,omitempty"`
+	AuthURL   string   `json:"auth_url,omitempty"`
 }
 
 // RecentList answers RecentRequest: decided records, newest first.
@@ -196,6 +199,7 @@ type PendingRecord struct {
 	Step      string            `json:"step,omitempty"`
 	ConfirmOf string            `json:"confirm_of,omitempty"`
 	Preview   *PreviewRecord    `json:"preview,omitempty"`
+	AuthURL   string            `json:"auth_url,omitempty"`
 }
 
 // VerdictRecord is written once, atomically (O_EXCL): one verdict wins.
