@@ -184,9 +184,8 @@ type FDDrift struct {
 }
 
 // SealFile is one frozen input in the artifact manifest: the archive
-// name (Rel), the live source it was bundled from (Abs), and its
-// SHA-256 at petition time. Rel names starting with __entrypoint__/
-// hold an entrypoint that lived outside the petition cwd.
+// name (Rel, slash-separated, cwd-relative), the live source it was
+// bundled from (Abs), and its SHA-256 at petition time.
 type SealFile struct {
 	Rel    string `json:"rel,omitempty"`
 	Abs    string `json:"abs,omitempty"`
