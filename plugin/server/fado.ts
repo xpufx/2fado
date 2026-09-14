@@ -362,6 +362,11 @@ interface DaemonTelegramInfoResponse {
   approvers?: string[];
   status?: "connected" | "disconnected" | "unconfigured" | "error";
   error?: string;
+  notification_target?: string;
+}
+
+function daemonNotificationTarget(raw: string | undefined): "telegram" | "paseo" | "both" {
+  return raw === "telegram" || raw === "paseo" || raw === "both" ? raw : "both";
 }
 
 async function telegramInfoInner(
@@ -387,6 +392,7 @@ async function telegramInfoInner(
       approvers: Array.isArray(raw?.approvers) ? raw.approvers : [],
       status,
       error: raw?.error,
+      notificationTarget: daemonNotificationTarget(raw?.notification_target),
     };
   } catch (err) {
     log.warn("telegram info fetch failed", { error: err });
@@ -395,6 +401,7 @@ async function telegramInfoInner(
       status: "unconfigured",
       approvers: [],
       error: err instanceof Error ? err.message : String(err),
+      notificationTarget: "both",
     };
   }
 }
@@ -423,6 +430,7 @@ async function telegramSetConfigInner(
           bot_token: input.botToken,
           chat_id: input.chatId,
           approvers: input.approvers,
+          notification_target: input.notificationTarget,
         },
       },
       input.socketPath,
