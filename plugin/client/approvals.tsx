@@ -25,6 +25,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Platform, Pressable, Text, View, Animated, Easing } from "react-native";
+import { ErrorBoundary } from "./error-boundary";
 import {
   approvalAck,
   approvalSettings,
@@ -143,7 +144,7 @@ export function useDaemonHealth() {
   });
 }
 
-export function ApprovalHeaderIcon(props: PluginButtonIconProps) {
+function ApprovalHeaderIconInner(props: PluginButtonIconProps) {
   const { theme } = props;
   const workspaceId = props.workspaceId;
   const size = props.size;
@@ -243,6 +244,18 @@ export function ApprovalHeaderIcon(props: PluginButtonIconProps) {
         />
       </Animated.View>
     </PluginThemeProvider>
+  );
+}
+
+export function ApprovalHeaderIcon(props: PluginButtonIconProps) {
+  const { size, color } = props;
+  return (
+    <ErrorBoundary
+      label="ApprovalHeaderIcon"
+      fallback={<Icon name="ShieldCheck" size={size} color={color} />}
+    >
+      <ApprovalHeaderIconInner {...props} />
+    </ErrorBoundary>
   );
 }
 
@@ -1020,7 +1033,7 @@ function TelegramStatusBar({ onOpenSettings }: { onOpenSettings(): void }) {
   );
 }
 
-export function ApprovalSurface({
+function ApprovalSurfaceInner({
   theme,
   layout,
   onOpenSettings,
@@ -1524,5 +1537,38 @@ export function ApprovalSurface({
         </View>
       </ScrollView>
     </PluginThemeProvider>
+  );
+}
+
+export function ApprovalSurface(props: PluginSurfaceProps & { onOpenSettings(): void }) {
+  const { theme, layout } = props;
+  return (
+    <ErrorBoundary
+      label="ApprovalSurface"
+      fallback={
+        <PluginThemeProvider theme={{ colors: theme.colors }} layout={layout}>
+          <ScrollView
+            style={{ flex: 1, backgroundColor: theme.colors.surface0 }}
+            contentContainerStyle={{ alignItems: "center", padding: 20 }}
+          >
+            <View style={{ width: "100%", maxWidth: 640, alignSelf: "center", gap: 10 }}>
+              <Card style={{ borderLeftWidth: 3, borderLeftColor: theme.colors.statusDanger }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Icon name="CloudOff" size={16} color={theme.colors.statusDanger} />
+                  <Text style={{ color: theme.colors.foreground, fontSize: 13, fontWeight: "600" }}>
+                    2fado panel hit a render error
+                  </Text>
+                </View>
+                <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, marginTop: 4 }}>
+                  Details are in the plugin logs. Re-open the panel to retry.
+                </Text>
+              </Card>
+            </View>
+          </ScrollView>
+        </PluginThemeProvider>
+      }
+    >
+      <ApprovalSurfaceInner {...props} />
+    </ErrorBoundary>
   );
 }
