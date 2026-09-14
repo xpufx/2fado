@@ -36,7 +36,8 @@ coded for the bot path), pager (stdout until you paste the token).
 2. Root service + systemd unit → real escalation via `target_user`.
 3. Policy tiers (allow/keyboard) → fewer buzzes.
 4. Approval UI + IdP → replaces inline taps when taps aren't enough.
-5. `2fado kill` + disconnect-withdraw → honest cancellation (owned pgs).
+5. Planned `2fado kill` (not implemented — no such subcommand today) +
+   disconnect-withdraw → honest cancellation (owned pgs).
 ```
 
 > Binary lives in `bin/` (gitignored); `make build`.
