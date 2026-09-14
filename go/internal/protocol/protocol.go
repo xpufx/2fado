@@ -135,6 +135,26 @@ type StatusRequest struct {
 	ID string `json:"id"`
 }
 
+// GitPin freezes the git tree state at petition time (T0) for TOCTOU
+// drift detection at approval (T1). Present is false outside git repos;
+// callers must degrade gracefully (skip the check, never fail on it).
+type GitPin struct {
+	Head      string `json:"head,omitempty"`
+	Branch    string `json:"branch,omitempty"`
+	Porcelain string `json:"porcelain,omitempty"`
+	Clean     bool   `json:"clean"`
+	Present   bool   `json:"present"`
+}
+
+// GitDrift reports a T0-vs-T1 tree comparison on the approval path.
+// Block means execution was refused; otherwise the run proceeded with
+// a DIRTY WORKSPACE warning attached.
+type GitDrift struct {
+	Drift  bool   `json:"drift"`
+	Reason string `json:"reason,omitempty"`
+	Block  bool   `json:"block,omitempty"`
+}
+
 // StatusResponse is the answer to a StatusRequest.
 // Status is one of: not_found | pending | confirming | running | completed | denied | timeout | client_aborted | acked.
 type StatusResponse struct {
@@ -158,6 +178,8 @@ type StatusResponse struct {
 	Acked     bool           `json:"acked,omitempty"`
 	AckBy     string         `json:"ack_by,omitempty"`
 	AckAt     int64          `json:"ack_at,omitempty"`
+	Git       *GitPin        `json:"git,omitempty"`
+	GitDrift  *GitDrift      `json:"git_drift,omitempty"`
 }
 
 // ListRequest asks for pending records (plugin server polls this).
@@ -179,6 +201,8 @@ type PendingItem struct {
 	Summary   string         `json:"summary,omitempty"`
 	Acked     bool           `json:"acked,omitempty"`
 	AckBy     string         `json:"ack_by,omitempty"`
+	Git       *GitPin        `json:"git,omitempty"`
+	GitDrift  *GitDrift      `json:"git_drift,omitempty"`
 }
 
 // PendingList answers ListRequest: unexpired, undecided records only.
@@ -194,21 +218,22 @@ type RecentRequest struct {
 // RecentItem is one decided record with its verdict and execution result.
 // Exit is -1 and Output empty when nothing executed (denied/timeout).
 type RecentItem struct {
-	ID        string   `json:"id"`
-	Argv      []string `json:"argv"`
-	Cwd       string   `json:"cwd"`
-	Decision  string   `json:"decision"`
-	By        string   `json:"by,omitempty"`
-	Exit      int      `json:"exit"`
-	Output    string   `json:"output,omitempty"`
-	Step      string   `json:"step,omitempty"`
-	ConfirmOf string   `json:"confirm_of,omitempty"`
-	AuthURL   string   `json:"auth_url,omitempty"`
-	Kind      string   `json:"kind,omitempty"`
-	Link      string   `json:"link,omitempty"`
-	Summary   string   `json:"summary,omitempty"`
-	Acked     bool     `json:"acked,omitempty"`
-	AckBy     string   `json:"ack_by,omitempty"`
+	ID        string    `json:"id"`
+	Argv      []string  `json:"argv"`
+	Cwd       string    `json:"cwd"`
+	Decision  string    `json:"decision"`
+	By        string    `json:"by,omitempty"`
+	Exit      int       `json:"exit"`
+	Output    string    `json:"output,omitempty"`
+	Step      string    `json:"step,omitempty"`
+	ConfirmOf string    `json:"confirm_of,omitempty"`
+	AuthURL   string    `json:"auth_url,omitempty"`
+	Kind      string    `json:"kind,omitempty"`
+	Link      string    `json:"link,omitempty"`
+	Summary   string    `json:"summary,omitempty"`
+	Acked     bool      `json:"acked,omitempty"`
+	AckBy     string    `json:"ack_by,omitempty"`
+	GitDrift  *GitDrift `json:"git_drift,omitempty"`
 }
 
 // RecentList answers RecentRequest: decided records, newest first.
@@ -249,6 +274,7 @@ type PendingRecord struct {
 	Kind      string            `json:"kind,omitempty"`
 	Link      string            `json:"link,omitempty"`
 	Summary   string            `json:"summary,omitempty"`
+	Git       *GitPin           `json:"git,omitempty"`
 }
 
 // AckRecord is written once, atomically (O_EXCL): first ack wins.
@@ -267,7 +293,7 @@ type VerdictRecord struct {
 
 // AuditEvent is one JSON line in the append-only log.
 type AuditEvent struct {
-	Ev         string   `json:"ev"` // request | verdict | allow | exec | confirm | confirmation_timeout | client_aborted | notify | ack
+	Ev         string   `json:"ev"` // request | verdict | allow | exec | confirm | confirmation_timeout | client_aborted | notify | ack | git_drift
 	UID        uint32   `json:"uid,omitempty"`
 	By         string   `json:"by,omitempty"`
 	Argv       []string `json:"argv,omitempty"`
