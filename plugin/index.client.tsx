@@ -2,7 +2,6 @@ import type { PluginClientContext, PluginSurfaceProps } from "@getpaseo/plugin/c
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, ScrollView, useToast } from "@getpaseo/plugin/client/react-native";
 import { initClientHelpers } from "paseo-plugin-helper/client";
-import { TwofadoSettingsScreen } from "./client/settings-screen";
 import { ErrorBoundary } from "./client/error-boundary";
 import {
   ApprovalHeaderIcon,
@@ -16,7 +15,7 @@ export default function contribute(client: PluginClientContext) {
 
   const Surface = (props: PluginSurfaceProps) => (
     <ErrorBoundary label="approvals surface" fallback={null}>
-      <ApprovalSurface {...props} onOpenSettings={() => client.openSettings("twofado")} />
+      <ApprovalSurface {...props} />
     </ErrorBoundary>
   );
   client.addSurface("approvals", Surface);
@@ -34,29 +33,6 @@ export default function contribute(client: PluginClientContext) {
     onSelect({ openSurface }) {
       openSurface("approvals");
     },
-  });
-  client.addCommandCenterItem({
-    id: "configure-approvals",
-    title: "Configure 2fado approval",
-    icon: "Settings",
-    context: "global",
-    onSelect({ openSettings }) {
-      openSettings("twofado");
-    },
-  });
-
-  // Local settings screen (not registerHelperSettingsScreen): the helper renders
-  // string fields as uncontrolled SettingsInput with a stable key, so stored
-  // values arriving after the async get() never populate the inputs.
-  const removeSettingsScreen = client.addSettingsScreen({
-    id: "twofado",
-    title: "2fado approval",
-    icon: "ShieldCheck",
-    Component: () => (
-      <ErrorBoundary label="2fado settings screen" fallback={null}>
-        <TwofadoSettingsScreen />
-      </ErrorBoundary>
-    ),
   });
 
   const buttons = new Map<string, () => void>();
@@ -105,6 +81,5 @@ export default function contribute(client: PluginClientContext) {
     unsubscribe();
     for (const remove of buttons.values()) remove();
     buttons.clear();
-    removeSettingsScreen();
   };
 }
