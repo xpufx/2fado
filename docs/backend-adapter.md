@@ -1,6 +1,6 @@
 # Backend adapter — third-party contract
 
-Status: draft. Source: design report on [Issue #28](https://forge.mrs.aager.de/oktay/2fado/issues/28) (contract inventory §1, adapter boundary §2). Code refs: `plugin/server/twofado.ts`, `plugin/shared/approval.ts`, `plugin/client/approvals.tsx`, `go/internal/protocol/protocol.go`.
+Status: draft. Source: design report on Issue #28 (Forgejo) (contract inventory §1, adapter boundary §2). Code refs: `plugin/server/twofado.ts`, `plugin/shared/approval.ts`, `plugin/client/approvals.tsx`, `go/internal/protocol/protocol.go`.
 
 This page defines what a third-party backend implements so the 2fado plugin can consume it without `2fadod`.
 
