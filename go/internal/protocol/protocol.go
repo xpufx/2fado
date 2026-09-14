@@ -155,6 +155,34 @@ type GitDrift struct {
 	Block  bool   `json:"block,omitempty"`
 }
 
+// FDPin freezes the entrypoint executable at petition time (T0): the
+// resolved path plus a content hash and device/inode identity captured
+// from an O_RDONLY|O_CLOEXEC open. At approval (T1) the daemon
+// re-opens, re-hashes, and executes via the verified fd (/dev/fd),
+// so binary swaps and symlink redirections on the entrypoint refuse
+// with FDDrift instead of running attacker bytes. Nil means the
+// entrypoint was un-pinnable; callers must degrade gracefully.
+type FDPin struct {
+	Path        string `json:"path,omitempty"`
+	Resolved    string `json:"resolved,omitempty"`
+	SHA256      string `json:"sha256,omitempty"`
+	Dev         uint64 `json:"dev,omitempty"`
+	Ino         uint64 `json:"ino,omitempty"`
+	Size        int64  `json:"size,omitempty"`
+	Mode        uint32 `json:"mode,omitempty"`
+	IsScript    bool   `json:"is_script,omitempty"`
+	Interpreter string `json:"interpreter,omitempty"`
+	InterpArg   string `json:"interp_arg,omitempty"`
+}
+
+// FDDrift reports a T0-vs-T1 entrypoint comparison on the approval path.
+// Block is always true: a swapped entrypoint never executes.
+type FDDrift struct {
+	Drift  bool   `json:"drift"`
+	Reason string `json:"reason,omitempty"`
+	Block  bool   `json:"block,omitempty"`
+}
+
 // StatusResponse is the answer to a StatusRequest.
 // Status is one of: not_found | pending | confirming | running | completed | denied | timeout | client_aborted | acked.
 type StatusResponse struct {
@@ -180,6 +208,8 @@ type StatusResponse struct {
 	AckAt     int64          `json:"ack_at,omitempty"`
 	Git       *GitPin        `json:"git,omitempty"`
 	GitDrift  *GitDrift      `json:"git_drift,omitempty"`
+	FD        *FDPin         `json:"fd,omitempty"`
+	FDDrift   *FDDrift       `json:"fd_drift,omitempty"`
 }
 
 // ListRequest asks for pending records (plugin server polls this).
@@ -203,6 +233,8 @@ type PendingItem struct {
 	AckBy     string         `json:"ack_by,omitempty"`
 	Git       *GitPin        `json:"git,omitempty"`
 	GitDrift  *GitDrift      `json:"git_drift,omitempty"`
+	FD        *FDPin         `json:"fd,omitempty"`
+	FDDrift   *FDDrift       `json:"fd_drift,omitempty"`
 }
 
 // PendingList answers ListRequest: unexpired, undecided records only.
@@ -234,6 +266,7 @@ type RecentItem struct {
 	Acked     bool      `json:"acked,omitempty"`
 	AckBy     string    `json:"ack_by,omitempty"`
 	GitDrift  *GitDrift `json:"git_drift,omitempty"`
+	FDDrift   *FDDrift  `json:"fd_drift,omitempty"`
 }
 
 // RecentList answers RecentRequest: decided records, newest first.
@@ -275,6 +308,7 @@ type PendingRecord struct {
 	Link      string            `json:"link,omitempty"`
 	Summary   string            `json:"summary,omitempty"`
 	Git       *GitPin           `json:"git,omitempty"`
+	FD        *FDPin            `json:"fd,omitempty"`
 }
 
 // AckRecord is written once, atomically (O_EXCL): first ack wins.
@@ -293,7 +327,7 @@ type VerdictRecord struct {
 
 // AuditEvent is one JSON line in the append-only log.
 type AuditEvent struct {
-	Ev         string   `json:"ev"` // request | verdict | allow | exec | confirm | confirmation_timeout | client_aborted | notify | ack | git_drift
+	Ev         string   `json:"ev"` // request | verdict | allow | exec | confirm | confirmation_timeout | client_aborted | notify | ack | git_drift | fd_drift
 	UID        uint32   `json:"uid,omitempty"`
 	By         string   `json:"by,omitempty"`
 	Argv       []string `json:"argv,omitempty"`
