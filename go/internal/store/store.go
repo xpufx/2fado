@@ -194,6 +194,8 @@ func (s Store) Purge(rid string) error {
 	_ = os.Remove(filepath.Join(s.Pending, rid+".verdict"))
 	_ = os.Remove(filepath.Join(s.Pending, rid+".result"))
 	_ = os.Remove(filepath.Join(s.Pending, rid+".ack"))
+	_ = os.Remove(filepath.Join(s.Dir, "sealed", rid+".tar.gz"))
+	_ = os.RemoveAll(filepath.Join(s.Dir, "sealed", rid+".d"))
 	return nil
 }
 
