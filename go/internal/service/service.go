@@ -245,6 +245,7 @@ func (s Service) RunWithCancel(req protocol.RunRequest, uid uint32, cancel <-cha
 		Env:     clean,
 		Step:    "initial",
 		Preview: preview,
+		Git:     snapshotGit(req.Cwd),
 	}, rid)
 	s.page(rid, req, uid)
 	if req.Detach {
@@ -330,6 +331,7 @@ func (s Service) confirm(rid1 string, req protocol.RunRequest, uid uint32, clean
 		ChatID:    rec1.ChatID,
 		MsgID:     rec1.MsgID,
 		Preview:   rec1.Preview,
+		Git:       snapshotGit(req.Cwd),
 	}, rid)
 	s.Store.Append(protocol.AuditEvent{
 		Ev:        "confirm",
@@ -405,6 +407,27 @@ func (s Service) confirm(rid1 string, req protocol.RunRequest, uid uint32, clean
 }
 
 func (s Service) runApproved(rid string, req protocol.RunRequest, uid uint32, clean map[string]string) protocol.RunResult {
+	if drift := s.checkGitDrift(rid, req.Cwd); drift != nil && drift.Drift {
+		decision := "warn"
+		if drift.Block {
+			decision = "block"
+		}
+		s.Store.Append(protocol.AuditEvent{Ev: "git_drift", Argv: req.Argv,
+			RID: rid, Decision: decision, Summary: drift.Reason})
+		if drift.Block {
+			s.Store.SaveResult(rid, -1, "git-drift: "+drift.Reason)
+			return protocol.RunResult{Status: "denied", Reason: "git-drift: " + drift.Reason}
+		}
+		code, out, asUID := s.ExecuteWithChallenge(req.Argv, req.Cwd, clean, func(authURL string) {
+			s.Store.SetAuthURL(rid, authURL)
+			s.notifyAuthURL(rid, req, authURL)
+		})
+		out = "WARNING: " + drift.Reason + ".\n" + out
+		s.Store.Append(protocol.AuditEvent{Ev: "exec", Argv: req.Argv,
+			RID: rid, AsUID: asUID, Exit: code, Dry: s.Conf.DryRun})
+		s.Store.SaveResult(rid, code, out)
+		return protocol.RunResult{Status: "allowed", Exit: code, Output: out}
+	}
 	code, out, asUID := s.ExecuteWithChallenge(req.Argv, req.Cwd, clean, func(authURL string) {
 		s.Store.SetAuthURL(rid, authURL)
 		s.notifyAuthURL(rid, req, authURL)
@@ -486,6 +509,8 @@ func (s Service) adoptOne(rid string, rec protocol.PendingRecord) {
 
 // List answers the plugin server's poll: pending, unexpired, undecided.
 // A telegram-only target pages nothing into Paseo, so the list stays empty.
+// Stored git pins ride along with their live drift so mid-review workspace
+// movement is visible before the approval-time gate fires.
 func (s Service) List() protocol.PendingList {
 	if !s.notifyPaseo() {
 		return protocol.PendingList{Items: []protocol.PendingItem{}}
@@ -494,21 +519,67 @@ func (s Service) List() protocol.PendingList {
 	if items == nil {
 		items = []protocol.PendingItem{}
 	}
+	for i := range items {
+		rec, err := s.Store.Load(items[i].ID)
+		if err != nil || rec.Git == nil || !rec.Git.Present {
+			continue
+		}
+		items[i].Git = rec.Git
+		if drift := s.checkGitDrift(items[i].ID, rec.Cwd); drift != nil {
+			items[i].GitDrift = drift
+		}
+	}
 	return protocol.PendingList{Items: items}
 }
 
 // Recent answers the plugin's history poll: decided records, newest first.
+// Drift-blocked runs carry their git_drift marker so history shows why
+// the run was refused.
 func (s Service) Recent(limit int) protocol.RecentList {
 	items := s.Store.Recent(limit)
 	if items == nil {
 		items = []protocol.RecentItem{}
 	}
+	for i := range items {
+		if items[i].Exit == -1 && strings.HasPrefix(items[i].Output, "git-drift:") {
+			items[i].GitDrift = &protocol.GitDrift{Drift: true, Block: true,
+				Reason: strings.TrimSpace(strings.TrimPrefix(items[i].Output, "git-drift:"))}
+		}
+	}
 	return protocol.RecentList{Items: items}
 }
 
 // Status answers a query for the state and outcome of a specific request ID.
+// A stored git pin is attached with its live drift so operators can see
+// workspace movement; a drift-blocked run reads as denied/git-drift.
 func (s Service) Status(id string) protocol.StatusResponse {
-	return s.Store.Status(id, time.Now().Unix())
+	st := s.Store.Status(id, time.Now().Unix())
+	if st.Output != "" && strings.HasPrefix(st.Output, "git-drift:") && st.Exit == -1 {
+		st.Status = "denied"
+		st.Decision = "git-drift"
+	}
+	rec, err := s.Store.Load(id)
+	if err != nil || rec.Git == nil || !rec.Git.Present {
+		return st
+	}
+	st.Git = rec.Git
+	dir := rec.Cwd
+	if dir == "" {
+		return st
+	}
+	live := snapshotGit(dir)
+	if live == nil {
+		return st
+	}
+	if !live.Present {
+		st.GitDrift = &protocol.GitDrift{Drift: true, Block: true,
+			Reason: "git worktree at " + dir + " is no longer a git repo"}
+		return st
+	}
+	if drift := s.checkGitDrift(id, dir); drift != nil {
+		st.GitDrift = drift
+	}
+	return st
 }
 
 // Submit records a local verdict (PoC path; production: SSO-bound UI).
