@@ -96,6 +96,50 @@ func Verdict(sock, decision, id string) int {
 	return 0
 }
 
+// Notify ships link+summary+ttl, prints the petition id, exits 0 on accept.
+func Notify(sock, link, summary string, ttlSeconds int64) int {
+	raw, err := call(sock, protocol.ClientMessage{
+		Notify: &protocol.NotifyRequest{Link: link, Summary: summary, TTLSeconds: ttlSeconds},
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "2fado: "+err.Error())
+		return 1
+	}
+	var res protocol.RunResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		fmt.Fprintln(os.Stderr, "2fado: bad reply")
+		return 1
+	}
+	if res.Status == "pending" {
+		fmt.Printf("2fado: notify submitted (id: %s). Use '2fado status %s' to check ack.\n", res.ID, res.ID)
+		return 0
+	}
+	fmt.Fprintf(os.Stderr, "2fado: notify rejected (%s)\n", res.Reason)
+	return 1
+}
+
+// Ack submits an acknowledgement for a notify petition id.
+func Ack(sock, id string) int {
+	raw, err := call(sock, protocol.ClientMessage{
+		Ack: &protocol.AckSubmit{ID: id},
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "2fado: "+err.Error())
+		return 1
+	}
+	var ack protocol.AckResponse
+	if err := json.Unmarshal(raw, &ack); err != nil {
+		fmt.Fprintln(os.Stderr, "2fado: bad reply")
+		return 1
+	}
+	if ack.Error != "" {
+		fmt.Fprintf(os.Stderr, "2fado: ack rejected (%s)\n", ack.Error)
+		return 1
+	}
+	fmt.Printf("{acked: %v}\n", ack.Acked)
+	return 0
+}
+
 // Status queries the state and execution outcome of a request id.
 func Status(sock, id string) int {
 	raw, err := call(sock, protocol.ClientMessage{
