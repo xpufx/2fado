@@ -4,32 +4,37 @@ Agents are fast, literal, and surrounded by untrusted text. `2fado` puts a
 human in the loop of *execution*: the agent petitions, your phone buzzes,
 you tap, it runs. Everything is recorded.
 
-No sudo involved (yet): the agent runs `2fado run -- <argv>`, the `2fadod`
-daemon decides (policy → allow / deny / ask-human over Telegram), executes
+No sudo involved (yet): the agent runs `2fado run -- <argv>`, the `2fado
+daemon` decides (policy → allow / deny / ask-human over Telegram), executes
 approved commands itself, and relays stdout + exit code. Fail closed on
 every path: deny, timeout, error, or a phone left untouched.
 
 ## Status: working PoC
 
-Live and ringing: single Go binary (`2fado daemon | run | approve|deny`),
-stdlib-only, Telegram pager, verified end to end (approve-by-phone,
-deny-by-phone, timeout, sender allowlist, one-time tokens, audit log).
+Live and ringing: single Go binary (`2fado daemon | run | approve|deny |
+notify | ack | status | version | socket-version`), stdlib-only, Telegram
+pager, verified end to end (approve-by-phone, deny-by-phone, timeout,
+sender allowlist, one-time tokens, audit log).
 Runs unprivileged — approved commands execute as you. Root execution
 (`target_user`) is implemented but parked: inert unless deliberately
 launched as root.
 
 ```
 go/          Go module (stdlib only): single `2fado` binary —
-             `daemon | run -- <argv...> | approve|deny <id>`
-             typed protocol, service/transport split (MCP fork kept open)
+              `daemon | run -- <argv...> | approve|deny <id> |
+              notify | ack <id> | status <id> | version | socket-version`
+              typed protocol, service/transport split (MCP fork kept open)
 bin/         build output (`make build`, gitignored)
 etc/         2fado.conf.example (__TELEGRAM_BOT_TOKEN__ / __TELEGRAM_USER_ID__),
-             policy.json.example, 2fadod.service.example
-docs/spec.md            general spec + flow diagram (the web-scale version)
+              policy.json.example, 2fadod.service.example
+docs/spec.md            general spec (superseded pre-PoC research, kept for
+                        history — not the current plan; see docs/poc.md)
 docs/options/           four tool compositions researched (step-ca, Authentik,
-                        Authelia, Rauthy, privacyIDEA) — all still pivotable
-docs/comparison.md      option matrix
-docs/recommendation.md  recommended stack + build order
+                        Authelia, Rauthy, privacyIDEA) — superseded pre-PoC
+                        research, kept for history; the Go PoC + Telegram +
+                        Paseo plugin is what shipped
+docs/comparison.md      option matrix (superseded, historical)
+docs/recommendation.md  recommended stack + build order (superseded, historical)
 docs/poc.md             runbook: try the PoC in two terminals, no root needed
 ```
 
