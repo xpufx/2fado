@@ -162,17 +162,18 @@ async function callDaemon(
 async function listPendingInner(
   input?: RpcInput<typeof pendingList>,
 ): Promise<RpcOutput<typeof pendingList>> {
-  const raw = (await callDaemon({ list: {} }, input?.socketPath)) as DaemonPendingList;
-  const host = os.hostname();
-  const items = Array.isArray(raw.items) ? raw.items : [];
-  return {
-    items: items.map((item) => ({
-      id: item.id,
-      argv: Array.isArray(item.argv) ? item.argv : [],
-      host,
-      caller: String(item.uid),
-      cwd: item.cwd,
-      expiresIn: item.expires_in,
+  try {
+    const raw = (await callDaemon({ list: {} }, input?.socketPath)) as DaemonPendingList;
+    const host = os.hostname();
+    const items = Array.isArray(raw.items) ? raw.items : [];
+    return {
+      items: items.map((item) => ({
+        id: item.id,
+        argv: Array.isArray(item.argv) ? item.argv : [],
+        host,
+        caller: String(item.uid),
+        cwd: typeof item.cwd === "string" ? item.cwd : "",
+        expiresIn: typeof item.expires_in === "number" ? item.expires_in : 0,
       step: item.step === "confirm" ? ("confirm" as const) : ("initial" as const),
       confirmOf: item.confirm_of,
       kind: item.kind,
@@ -190,9 +191,13 @@ async function listPendingInner(
             riskLevel: item.preview.risk_level,
             riskReason: item.preview.risk_reason,
           }
-        : undefined,
-    })),
-  };
+          : undefined,
+      })),
+    };
+  } catch (err) {
+    log.warn("pending list failed", { error: err });
+    return { items: [] };
+  }
 }
 
 async function submitVerdictInner(
