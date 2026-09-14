@@ -57,21 +57,30 @@ func pidFilePath() string {
 }
 
 func peerUID(c net.Conn) uint32 {
+	_, uid := peerCred(c)
+	return uid
+}
+
+// peerCred returns the socket peer PID and UID via SO_PEERCRED. The
+// PID identifies the requesting agent process group at petition time
+// for the suspended-execution barrier; unknown peers yield pid 0,
+// which skips the barrier.
+func peerCred(c net.Conn) (int, uint32) {
 	uc, ok := c.(*net.UnixConn)
 	if !ok {
-		return 0
+		return 0, 0
 	}
 	f, err := uc.File()
 	if err != nil {
-		return 0
+		return 0, 0
 	}
 	defer f.Close()
 	// SO_PEERCRED via syscall is Linux-specific; keep it contained here.
-	uid, err := soPeercred(f.Fd())
+	pid, uid, err := soPeercred(f.Fd())
 	if err != nil {
-		return 0
+		return 0, 0
 	}
-	return uid
+	return pid, uid
 }
 
 func Serve(svc service.Service) error {
@@ -120,13 +129,13 @@ func handle(svc *service.Service, c net.Conn) {
 		return
 	}
 	var out []byte
-	uid := peerUID(c)
+	peerPID, uid := peerCred(c)
 	switch {
 	case msg.Verdict != nil:
 		ack := svc.Submit(*msg.Verdict, uid)
 		out, _ = json.Marshal(ack)
 	case msg.Notify != nil:
-		res := svc.Notify(*msg.Notify, peerUID(c))
+		res := svc.Notify(*msg.Notify, uid)
 		out, _ = json.Marshal(res)
 	case msg.Ack != nil:
 		ack := svc.Ack(*msg.Ack, uid)
@@ -139,7 +148,7 @@ func handle(svc *service.Service, c net.Conn) {
 			_, _ = c.Read(b[:])
 			once.Do(func() { close(disconnect) })
 		}()
-		res := svc.RunWithCancel(*msg.Run, peerUID(c), disconnect)
+		res := svc.RunWithPeerCancel(*msg.Run, uid, peerPID, disconnect)
 		out, _ = json.Marshal(res)
 	case msg.List != nil:
 		out, _ = json.Marshal(svc.List())
