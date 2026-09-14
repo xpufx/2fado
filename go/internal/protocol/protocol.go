@@ -183,6 +183,18 @@ type FDDrift struct {
 	Block  bool   `json:"block,omitempty"`
 }
 
+// SuspendPin freezes the requesting agent at petition time (T0): the
+// daemon identifies the caller's process group via the socket peer PID
+// and holds it with SIGSTOP while the operator reviews. SIGCONT on
+// verdict, timeout, or client abort resumes it. Best-effort only: a
+// stopped group cannot fork new work, but background groups, other
+// UIDs, and pre-stop mutations are outside this barrier.
+type SuspendPin struct {
+	PID       int  `json:"pid,omitempty"`
+	PGID      int  `json:"pgid,omitempty"`
+	Suspended bool `json:"suspended,omitempty"`
+}
+
 // StatusResponse is the answer to a StatusRequest.
 // Status is one of: not_found | pending | confirming | running | completed | denied | timeout | client_aborted | acked.
 type StatusResponse struct {
@@ -210,6 +222,7 @@ type StatusResponse struct {
 	GitDrift  *GitDrift      `json:"git_drift,omitempty"`
 	FD        *FDPin         `json:"fd,omitempty"`
 	FDDrift   *FDDrift       `json:"fd_drift,omitempty"`
+	Suspend   *SuspendPin    `json:"suspend,omitempty"`
 }
 
 // ListRequest asks for pending records (plugin server polls this).
@@ -235,6 +248,7 @@ type PendingItem struct {
 	GitDrift  *GitDrift      `json:"git_drift,omitempty"`
 	FD        *FDPin         `json:"fd,omitempty"`
 	FDDrift   *FDDrift       `json:"fd_drift,omitempty"`
+	Suspend   *SuspendPin    `json:"suspend,omitempty"`
 }
 
 // PendingList answers ListRequest: unexpired, undecided records only.
@@ -309,6 +323,7 @@ type PendingRecord struct {
 	Summary   string            `json:"summary,omitempty"`
 	Git       *GitPin           `json:"git,omitempty"`
 	FD        *FDPin            `json:"fd,omitempty"`
+	Suspend   *SuspendPin       `json:"suspend,omitempty"`
 }
 
 // AckRecord is written once, atomically (O_EXCL): first ack wins.
@@ -327,7 +342,7 @@ type VerdictRecord struct {
 
 // AuditEvent is one JSON line in the append-only log.
 type AuditEvent struct {
-	Ev         string   `json:"ev"` // request | verdict | allow | exec | confirm | confirmation_timeout | client_aborted | notify | ack | git_drift | fd_drift
+	Ev         string   `json:"ev"` // request | verdict | allow | exec | confirm | confirmation_timeout | client_aborted | notify | ack | git_drift | fd_drift | suspend | resume
 	UID        uint32   `json:"uid,omitempty"`
 	By         string   `json:"by,omitempty"`
 	Argv       []string `json:"argv,omitempty"`
