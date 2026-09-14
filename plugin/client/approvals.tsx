@@ -1231,13 +1231,14 @@ function ApprovalSurfaceInner({
           });
         }
       })();
-    } catch {
+    } catch (err) {
       if (!isMountedRef.current) return;
       setDecidingMap((prev) => {
         const next = { ...prev };
         delete next[id];
         return next;
       });
+      console.warn("[2fado] Verdict RPC failed:", err);
       toast.error("Verdict failed — 2fadod unreachable.");
     }
   };
@@ -1260,13 +1261,14 @@ function ApprovalSurfaceInner({
       }
       void queryClient.invalidateQueries({ queryKey: LIST_KEY });
       void queryClient.invalidateQueries({ queryKey: RECENT_KEY });
-    } catch {
+    } catch (err) {
       if (!isMountedRef.current) return;
       setAckingMap((prev) => {
         const next = { ...prev };
         delete next[id];
         return next;
       });
+      console.warn("[2fado] Ack RPC failed:", err);
       toast.error("Ack failed — 2fadod unreachable.");
     }
   };
@@ -1334,7 +1336,8 @@ function ApprovalSurfaceInner({
       );
       setPolicyDialog(null);
       await handleDecide(item, target === "whitelist" ? "approve" : "deny");
-    } catch {
+    } catch (err) {
+      console.warn("[2fado] Policy rule save failed:", err);
       toast.error("Rule save failed — 2fadod unreachable.");
     } finally {
       if (isMountedRef.current) setPolicySaving(false);
