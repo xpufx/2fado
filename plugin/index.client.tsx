@@ -82,10 +82,12 @@ export default function contribute(client: PluginClientContext) {
     .then(() => client.paseo.agents.list())
     .then(
       (res) => {
-        const agents = Array.isArray((res as { agents?: unknown }).agents)
-          ? (res as { agents: Array<{ workspaceId?: unknown }> }).agents
+        const entries = Array.isArray(
+          (res as unknown as { entries?: unknown }).entries,
+        )
+          ? (res as unknown as { entries: Array<{ workspaceId?: unknown }> }).entries
           : [];
-        for (const agent of agents) {
+        for (const agent of entries) {
           if (typeof agent?.workspaceId === "string") addButton(agent.workspaceId);
         }
       },
