@@ -93,20 +93,24 @@ type TelegramInfoRequest struct{}
 
 // TelegramInfoResponse answers TelegramInfoRequest.
 // Status is one of: "connected" | "disconnected" | "unconfigured" | "error".
+// NotificationTarget is one of: "telegram" | "paseo" | "both".
 type TelegramInfoResponse struct {
-	Configured  bool     `json:"configured"`
-	BotUsername string   `json:"bot_username,omitempty"`
-	ChatID      string   `json:"chat_id,omitempty"`
-	Approvers   []string `json:"approvers"`
-	Status      string   `json:"status"`
-	Error       string   `json:"error,omitempty"`
+	Configured         bool     `json:"configured"`
+	BotUsername        string   `json:"bot_username,omitempty"`
+	ChatID             string   `json:"chat_id,omitempty"`
+	Approvers          []string `json:"approvers"`
+	Status             string   `json:"status"`
+	Error              string   `json:"error,omitempty"`
+	NotificationTarget string   `json:"notification_target"`
 }
 
 // TelegramSetConfigRequest sends updated Telegram bot credentials and recipients.
+// NotificationTarget selects the paging channels; empty leaves it unchanged.
 type TelegramSetConfigRequest struct {
-	BotToken  *string  `json:"bot_token,omitempty"`
-	ChatID    string   `json:"chat_id,omitempty"`
-	Approvers []string `json:"approvers,omitempty"`
+	BotToken           *string  `json:"bot_token,omitempty"`
+	ChatID             string   `json:"chat_id,omitempty"`
+	Approvers          []string `json:"approvers,omitempty"`
+	NotificationTarget string   `json:"notification_target,omitempty"`
 }
 
 // TelegramSetConfigResponse answers TelegramSetConfigRequest.
