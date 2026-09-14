@@ -1,7 +1,12 @@
 # Go port notes
 
+> Note (2026-09): the shipped CLI is wider than the one-liner below —
+> see `docs/backend-cli.md` for the full surface (`daemon | run |
+> approve|deny | notify | ack | status | version | socket-version`).
+
 Python proved the loop (it rang the phone); Go is the keeper. Single
-static binary, `2fado daemon | run | approve|deny`, stdlib only
+static binary, `2fado daemon | run | approve|deny | notify | ack |
+status | version | socket-version`, stdlib only
 (`go build`, no deps).
 
 ## Typing discipline
