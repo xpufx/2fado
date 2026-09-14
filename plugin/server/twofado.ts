@@ -487,7 +487,7 @@ export const getHealth = guardRpcHandler(healthInner, {
   onSaturated: (info) => log.warn("health saturated, shedding load", info),
 });
 
-export class FadoClient {
+export class TwofadoClient {
   constructor(private socketPath?: string) {}
 
   async policyAddRule(
@@ -496,6 +496,8 @@ export class FadoClient {
     return policyAddRuleInner({ ...params, socketPath: params?.socketPath ?? this.socketPath });
   }
 }
+
+export const FadoClient = TwofadoClient;
 
 interface DaemonPolicyAddRuleResponse {
   success?: boolean;
