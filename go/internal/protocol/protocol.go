@@ -183,6 +183,37 @@ type FDDrift struct {
 	Block  bool   `json:"block,omitempty"`
 }
 
+// SealFile is one frozen input in the artifact manifest: the archive
+// name (Rel), the live source it was bundled from (Abs), and its
+// SHA-256 at petition time. Rel names starting with __entrypoint__/
+// hold an entrypoint that lived outside the petition cwd.
+type SealFile struct {
+	Rel    string `json:"rel,omitempty"`
+	Abs    string `json:"abs,omitempty"`
+	SHA256 string `json:"sha256,omitempty"`
+	Size   int64  `json:"size,omitempty"`
+	Mode   uint32 `json:"mode,omitempty"`
+}
+
+// SealPin freezes the petition's mutable inputs at T0: the daemon
+// bundles them into an immutable tar.gz (Archive) and binds approval
+// to the Root hash over the sorted per-file hashes. Nil (or empty)
+// means nothing sealable; callers must degrade gracefully.
+type SealPin struct {
+	Root    string     `json:"root,omitempty"`
+	Files   []SealFile `json:"files,omitempty"`
+	Archive string     `json:"archive,omitempty"`
+}
+
+// SealDrift reports a T0-vs-T1 artifact comparison on the approval
+// path. Block is always true: a mutated input never executes live;
+// verified runs execute the rewritten sealed copies instead.
+type SealDrift struct {
+	Drift  bool   `json:"drift"`
+	Reason string `json:"reason,omitempty"`
+	Block  bool   `json:"block,omitempty"`
+}
+
 // SuspendPin freezes the requesting agent at petition time (T0): the
 // daemon identifies the caller's process group via the socket peer PID
 // and holds it with SIGSTOP while the operator reviews. SIGCONT on
@@ -222,6 +253,8 @@ type StatusResponse struct {
 	GitDrift  *GitDrift      `json:"git_drift,omitempty"`
 	FD        *FDPin         `json:"fd,omitempty"`
 	FDDrift   *FDDrift       `json:"fd_drift,omitempty"`
+	Seal      *SealPin       `json:"seal,omitempty"`
+	SealDrift *SealDrift     `json:"seal_drift,omitempty"`
 	Suspend   *SuspendPin    `json:"suspend,omitempty"`
 }
 
@@ -248,6 +281,8 @@ type PendingItem struct {
 	GitDrift  *GitDrift      `json:"git_drift,omitempty"`
 	FD        *FDPin         `json:"fd,omitempty"`
 	FDDrift   *FDDrift       `json:"fd_drift,omitempty"`
+	Seal      *SealPin       `json:"seal,omitempty"`
+	SealDrift *SealDrift     `json:"seal_drift,omitempty"`
 	Suspend   *SuspendPin    `json:"suspend,omitempty"`
 }
 
@@ -264,23 +299,24 @@ type RecentRequest struct {
 // RecentItem is one decided record with its verdict and execution result.
 // Exit is -1 and Output empty when nothing executed (denied/timeout).
 type RecentItem struct {
-	ID        string    `json:"id"`
-	Argv      []string  `json:"argv"`
-	Cwd       string    `json:"cwd"`
-	Decision  string    `json:"decision"`
-	By        string    `json:"by,omitempty"`
-	Exit      int       `json:"exit"`
-	Output    string    `json:"output,omitempty"`
-	Step      string    `json:"step,omitempty"`
-	ConfirmOf string    `json:"confirm_of,omitempty"`
-	AuthURL   string    `json:"auth_url,omitempty"`
-	Kind      string    `json:"kind,omitempty"`
-	Link      string    `json:"link,omitempty"`
-	Summary   string    `json:"summary,omitempty"`
-	Acked     bool      `json:"acked,omitempty"`
-	AckBy     string    `json:"ack_by,omitempty"`
-	GitDrift  *GitDrift `json:"git_drift,omitempty"`
-	FDDrift   *FDDrift  `json:"fd_drift,omitempty"`
+	ID        string     `json:"id"`
+	Argv      []string   `json:"argv"`
+	Cwd       string     `json:"cwd"`
+	Decision  string     `json:"decision"`
+	By        string     `json:"by,omitempty"`
+	Exit      int        `json:"exit"`
+	Output    string     `json:"output,omitempty"`
+	Step      string     `json:"step,omitempty"`
+	ConfirmOf string     `json:"confirm_of,omitempty"`
+	AuthURL   string     `json:"auth_url,omitempty"`
+	Kind      string     `json:"kind,omitempty"`
+	Link      string     `json:"link,omitempty"`
+	Summary   string     `json:"summary,omitempty"`
+	Acked     bool       `json:"acked,omitempty"`
+	AckBy     string     `json:"ack_by,omitempty"`
+	GitDrift  *GitDrift  `json:"git_drift,omitempty"`
+	FDDrift   *FDDrift   `json:"fd_drift,omitempty"`
+	SealDrift *SealDrift `json:"seal_drift,omitempty"`
 }
 
 // RecentList answers RecentRequest: decided records, newest first.
@@ -323,6 +359,7 @@ type PendingRecord struct {
 	Summary   string            `json:"summary,omitempty"`
 	Git       *GitPin           `json:"git,omitempty"`
 	FD        *FDPin            `json:"fd,omitempty"`
+	Seal      *SealPin          `json:"seal,omitempty"`
 	Suspend   *SuspendPin       `json:"suspend,omitempty"`
 }
 
@@ -342,7 +379,7 @@ type VerdictRecord struct {
 
 // AuditEvent is one JSON line in the append-only log.
 type AuditEvent struct {
-	Ev         string   `json:"ev"` // request | verdict | allow | exec | confirm | confirmation_timeout | client_aborted | notify | ack | git_drift | fd_drift | suspend | resume
+	Ev         string   `json:"ev"` // request | verdict | allow | exec | confirm | confirmation_timeout | client_aborted | notify | ack | git_drift | fd_drift | seal_drift | suspend | resume
 	UID        uint32   `json:"uid,omitempty"`
 	By         string   `json:"by,omitempty"`
 	Argv       []string `json:"argv,omitempty"`
