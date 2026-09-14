@@ -323,7 +323,8 @@ func (s Service) materializeSeal(rid string) (string, error) {
 			_ = os.RemoveAll(dir)
 			return "", err
 		}
-		if err := os.WriteFile(dst, b, 0o600); err != nil {
+		perm := os.FileMode(0o600 | os.FileMode(want_file.Mode&0o111))
+		if err := os.WriteFile(dst, b, perm); err != nil {
 			_ = os.RemoveAll(dir)
 			return "", err
 		}
