@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { defineContract, defineSettingsContract } from "paseo-plugin-helper/shared";
 
+export const notificationTargets = ["telegram", "paseo", "both"] as const;
+export type NotificationTarget = (typeof notificationTargets)[number];
+
 export const pendingList = defineContract({
   name: "approval.list",
   input: z.object({ socketPath: z.string().min(1).optional() }),
@@ -140,6 +143,7 @@ export const approvalTelegramInfo = defineContract({
     approvers: z.array(z.string()).default([]),
     status: z.enum(["connected", "disconnected", "unconfigured", "error"]).default("unconfigured"),
     error: z.string().optional(),
+    notificationTarget: z.enum(notificationTargets).default("both"),
   }),
   description: "Query Telegram bot connectivity status and recipient metadata",
 });
@@ -150,6 +154,7 @@ export const approvalTelegramSetConfig = defineContract({
     botToken: z.string().optional(),
     chatId: z.string().optional(),
     approvers: z.array(z.string()).optional(),
+    notificationTarget: z.enum(notificationTargets).optional(),
     socketPath: z.string().min(1).optional(),
   }),
   output: z.object({
@@ -203,6 +208,27 @@ export type ApprovalApi = {
   policyAddRule(params: PolicyAddRuleParams): Promise<PolicyAddRuleResult>;
 };
 
+export function migrateLegacyNotificationTarget(input: unknown): {
+  data: Record<string, unknown>;
+  changed: boolean;
+} {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return { data: {}, changed: false };
+  }
+  const record = input as Record<string, unknown>;
+  if (!("telegramFallback" in record)) {
+    return { data: record, changed: false };
+  }
+  const { telegramFallback, notificationTarget, ...rest } = record;
+  if (notificationTarget !== undefined) {
+    return { data: { ...rest, notificationTarget }, changed: true };
+  }
+  return {
+    data: { ...rest, notificationTarget: telegramFallback === false ? "paseo" : "both" },
+    changed: true,
+  };
+}
+
 const settingsSchema = z.object({
   socketPath: z
     .string()
@@ -210,7 +236,10 @@ const settingsSchema = z.object({
     .min(1, "Enter the 2fadod socket path")
     .default("/tmp/2fado.sock")
     .describe("2fadod socket"),
-  telegramFallback: z.boolean().default(true).describe("Telegram fallback"),
+  notificationTarget: z
+    .enum(notificationTargets)
+    .default("both")
+    .describe("Notification target"),
   telegramBotToken: z.string().default("").describe("Telegram bot token"),
   telegramChatId: z.string().default("").describe("Telegram chat ID"),
   telegramApprovers: z.string().default("").describe("Telegram approvers"),
