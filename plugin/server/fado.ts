@@ -3,6 +3,7 @@ import os from "node:os";
 import type { RpcInput, RpcOutput } from "paseo-plugin-helper/shared";
 import { createPluginLogger, guardRpcHandler } from "paseo-plugin-helper/server";
 import {
+  approvalAck,
   approvalSettings,
   approvalStatus,
   approvalTelegramInfo,
@@ -40,6 +41,12 @@ interface DaemonPendingItem {
   expires_in: number;
   step?: string;
   confirm_of?: string;
+  kind?: string;
+  link?: string;
+  summary?: string;
+  acked?: boolean;
+  ack_by?: string;
+  auth_url?: string;
   preview?: {
     resolved_binary?: string;
     target_cwd?: string;
@@ -64,6 +71,12 @@ interface DaemonRecentItem {
   output: string;
   step?: string;
   confirm_of?: string;
+  kind?: string;
+  link?: string;
+  summary?: string;
+  acked?: boolean;
+  ack_by?: string;
+  auth_url?: string;
 }
 
 interface DaemonRecentList {
@@ -83,6 +96,13 @@ interface DaemonStatusResponse {
   output?: string;
   step?: string;
   confirm_of?: string;
+  kind?: string;
+  link?: string;
+  summary?: string;
+  acked?: boolean;
+  ack_by?: string;
+  ack_at?: number;
+  auth_url?: string;
 }
 
 function callDaemonOn(sock: string, message: unknown, timeoutMs: number): Promise<unknown> {
@@ -155,6 +175,12 @@ async function listPendingInner(
       expiresIn: item.expires_in,
       step: item.step === "confirm" ? ("confirm" as const) : ("initial" as const),
       confirmOf: item.confirm_of,
+      kind: item.kind,
+      link: item.link,
+      summary: item.summary,
+      acked: item.acked,
+      ackBy: item.ack_by,
+      authUrl: item.auth_url,
       preview: item.preview
         ? {
             resolvedBinary: item.preview.resolved_binary,
@@ -212,6 +238,12 @@ async function listRecentInner(
         output: typeof item.output === "string" ? item.output : "",
         step: item.step === "confirm" ? ("confirm" as const) : ("initial" as const),
         confirmOf: item.confirm_of,
+        kind: item.kind,
+        link: item.link,
+        summary: item.summary,
+        acked: item.acked,
+        ackBy: item.ack_by,
+        authUrl: item.auth_url,
       })),
     };
   } catch (err) {
@@ -232,6 +264,31 @@ export const submitVerdict = guardRpcHandler(submitVerdictInner, {
   maxInflight: 4,
   onTimeout: (info) => log.warn("verdict timed out", info),
   onSaturated: (info) => log.warn("verdict saturated, shedding load", info),
+});
+
+async function submitAckInner(
+  input?: RpcInput<typeof approvalAck>,
+): Promise<RpcOutput<typeof approvalAck>> {
+  if (input === undefined || !input.id) return { acked: false };
+  try {
+    const raw = (await callDaemon(
+      {
+        ack: { id: input.id, by: "paseo" },
+      },
+      input.socketPath,
+    )) as { acked: boolean };
+    return { acked: raw.acked === true };
+  } catch (err) {
+    log.warn("ack submit failed", { id: input.id, error: err });
+    return { acked: false };
+  }
+}
+
+export const submitAck = guardRpcHandler(submitAckInner, {
+  timeoutMs: 5000,
+  maxInflight: 4,
+  onTimeout: (info) => log.warn("ack timed out", info),
+  onSaturated: (info) => log.warn("ack saturated, shedding load", info),
 });
 
 async function statusInner(
@@ -255,6 +312,7 @@ async function statusInner(
       "timeout",
       "client_aborted",
       "confirmation_timeout",
+      "acked",
     ] as const;
     const rawStatus = raw?.status as (typeof validStatuses)[number];
     const status = validStatuses.includes(rawStatus) ? rawStatus : "not_found";
@@ -270,6 +328,13 @@ async function statusInner(
       expiresIn: raw?.expires_in,
       step: raw?.step,
       confirmOf: raw?.confirm_of,
+      kind: raw?.kind,
+      link: raw?.link,
+      summary: raw?.summary,
+      acked: raw?.acked,
+      ackBy: raw?.ack_by,
+      ackAt: raw?.ack_at,
+      authUrl: raw?.auth_url,
     };
   } catch (err) {
     log.warn("status fetch failed", { id: input.id, error: err });
