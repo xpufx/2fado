@@ -3,6 +3,7 @@ import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, ScrollView, useToast } from "@getpaseo/plugin/client/react-native";
 import { initClientHelpers } from "paseo-plugin-helper/client";
 import { TwofadoSettingsScreen } from "./client/settings-screen";
+import { ErrorBoundary } from "./client/error-boundary";
 import {
   ApprovalHeaderIcon,
   ApprovalSurface,
@@ -14,7 +15,9 @@ export default function contribute(client: PluginClientContext) {
   initClientHelpers({ Icon, Modal, useRpc, useToast, ScrollView });
 
   const Surface = (props: PluginSurfaceProps) => (
-    <ApprovalSurface {...props} onOpenSettings={() => client.openSettings("twofado")} />
+    <ErrorBoundary label="approvals surface" fallback={null}>
+      <ApprovalSurface {...props} onOpenSettings={() => client.openSettings("twofado")} />
+    </ErrorBoundary>
   );
   client.addSurface("approvals", Surface);
   client.addSidebarItem({
@@ -49,7 +52,11 @@ export default function contribute(client: PluginClientContext) {
     id: "twofado",
     title: "2fado approval",
     icon: "ShieldCheck",
-    Component: TwofadoSettingsScreen,
+    Component: () => (
+      <ErrorBoundary label="2fado settings screen" fallback={null}>
+        <TwofadoSettingsScreen />
+      </ErrorBoundary>
+    ),
   });
 
   const buttons = new Map<string, () => void>();
