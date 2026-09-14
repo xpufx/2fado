@@ -1,6 +1,9 @@
 # 2fado Paseo plugin — spec v1 (second approval transport)
 
-Status: spec. No code. Upstream facts (via Master, confirmed): pill
+Status: implemented (see `plugin/` — client, server, shared contracts).
+This doc is the original v1 spec, kept for history; scope notes below may
+lag the code (`docs/backend-api.md` is the current contract reference).
+Upstream facts (via Master, confirmed): pill
 bodies + attached modal/popover are **human-only** (no agent read or
 interaction path; buttons call plugin RPCs agents can't reach).
 Timeline item **data is agent-visible** as transcript even though the
@@ -52,8 +55,10 @@ verdict = defineContract({
 ## Server behavior (daemon subprocess, trusted)
 
 - Owns the socket to `2fadod` (per-call `socketPath` from the app,
-  then `TWOFADO_SOCKET` env, then `FADO_SOCKET` env, then `/run/2fado.sock`, then
-  `/tmp/2fado.sock`). Polls `list` and fans out: toast per new id.
+  then `TWOFADO_SOCKET` env, then `FADO_SOCKET` env, then
+  `/tmp/2fado.sock` — see `socketCandidates()` in
+  `plugin/server/twofado.ts`; the `/run/2fado.sock` candidate mentioned
+  in earlier drafts of this doc is not in the code). Polls `list` and fans out: toast per new id.
   Socket calls are wrapped in `guardRpcHandler` (5s timeout, max 4
   inflight, fail-fast) with structured `createPluginLogger` logging.
 - Verdict handler submits `{id, decision, by: "paseo"}` over the `2fadod`
