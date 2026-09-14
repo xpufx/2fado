@@ -24,7 +24,7 @@ import {
 } from "paseo-plugin-helper/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { Platform, Pressable, Text, View, Animated, Easing } from "react-native";
+import { Platform, Text, View, Animated, Easing } from "react-native";
 import { ErrorBoundary } from "./error-boundary";
 import {
   approvalAck,
@@ -312,23 +312,13 @@ function CommandBox({ argv }: { argv: string[] }) {
           ) : null}
         </Text>
       </View>
-      <Pressable
-        onPress={handleCopy}
-        accessibilityRole="button"
+      <Button
+        variant="ghost"
+        size="sm"
+        icon={copied ? "Check" : "Copy"}
         accessibilityLabel="Copy command"
-        hitSlop={8}
-        style={({ pressed }) => ({
-          padding: 3,
-          borderRadius: 4,
-          backgroundColor: pressed ? colors.surface1 : "transparent",
-        })}
-      >
-        <Icon
-          name={copied ? "Check" : "Copy"}
-          size={13}
-          color={copied ? colors.statusSuccess : colors.foregroundMuted}
-        />
-      </Pressable>
+        onPress={handleCopy}
+      />
     </View>
   );
 }
@@ -720,23 +710,13 @@ function NotifyItem({
           >
             {item.link}
           </Text>
-          <Pressable
-            onPress={() => void handleCopyLink()}
-            accessibilityRole="button"
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={copied ? "Check" : "Copy"}
             accessibilityLabel="Copy link"
-            hitSlop={8}
-            style={({ pressed }) => ({
-              padding: 3,
-              borderRadius: 4,
-              backgroundColor: pressed ? colors.surface1 : "transparent",
-            })}
-          >
-            <Icon
-              name={copied ? "Check" : "Copy"}
-              size={13}
-              color={copied ? colors.statusSuccess : colors.foregroundMuted}
-            />
-          </Pressable>
+            onPress={() => void handleCopyLink()}
+          />
         </View>
       ) : null}
 
@@ -1009,14 +989,13 @@ function TelegramStatusBar({ onOpenSettings }: { onOpenSettings(): void }) {
             variant={badgeVariant}
             styleVariant="tinted"
           />
-          <Pressable
-            accessibilityRole="button"
+          <Button
+            variant="ghost"
+            size="sm"
+            icon="Settings"
             accessibilityLabel="Configure Telegram settings"
             onPress={onOpenSettings}
-            style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, padding: 2 })}
-          >
-            <Icon name="Settings" size={13} color={colors.foregroundMuted} />
-          </Pressable>
+          />
         </View>
       </View>
       {(info?.botUsername || info?.chatId) ? (
@@ -1449,34 +1428,22 @@ function ApprovalSurfaceInner({
                   <Text style={{ color: theme.colors.foreground, fontSize: 13, fontWeight: "700" }}>
                     {policyDialog.target === "whitelist" ? "Always approve" : "Always deny"} — pick scope
                   </Text>
-                  {(["exact", "base", "custom"] as const).map((scope) => (
-                    <Pressable
-                      key={scope}
-                      accessibilityRole="button"
-                      onPress={() => setPolicyScope(scope)}
-                      style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 }}
-                    >
-                      <View
-                        style={{
-                          width: 14,
-                          height: 14,
-                          borderRadius: 7,
-                          borderWidth: 2,
-                          borderColor: theme.colors.accent,
-                          backgroundColor:
-                            policyScope === scope ? theme.colors.accent : "transparent",
-                        }}
-                      />
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ color: theme.colors.foreground, fontSize: 12, fontWeight: "600" }}>
-                          {scope === "exact" ? "Exact match" : scope === "base" ? "Base binary" : "Custom pattern"}
-                        </Text>
-                        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
-                          {scope === "exact" ? policyExact : scope === "base" ? policyBase : "Edit arguments below"}
-                        </Text>
-                      </View>
-                    </Pressable>
-                  ))}
+                  <Tabs
+                    tabs={[
+                      { id: "exact", label: "Exact match", icon: "Check" },
+                      { id: "base", label: "Base binary", icon: "Terminal" },
+                      { id: "custom", label: "Custom pattern", icon: "Edit" },
+                    ]}
+                    activeTab={policyScope}
+                    onTabChange={(id) => setPolicyScope(id as "exact" | "base" | "custom")}
+                  />
+                  <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
+                    {policyScope === "exact"
+                      ? policyExact
+                      : policyScope === "base"
+                        ? policyBase
+                        : "Edit arguments below"}
+                  </Text>
                   {policyScope === "custom" ? (
                     <TextInput
                       value={customPattern}
