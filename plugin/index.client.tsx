@@ -1,15 +1,8 @@
 import type { PluginClientContext, PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, ScrollView, useToast } from "@getpaseo/plugin/client/react-native";
-import {
-  SettingsCard,
-  SettingsInput,
-  SettingsSection,
-  SettingsSwitch,
-} from "@getpaseo/plugin/client/ui";
-import { initClientHelpers, registerHelperSettingsScreen } from "paseo-plugin-helper/client";
-import { approvalSettings } from "./shared/approval";
-import { NotificationTargetSelect } from "./client/notification-target-select";
+import { initClientHelpers } from "paseo-plugin-helper/client";
+import { TwofadoSettingsScreen } from "./client/settings-screen";
 import {
   ApprovalHeaderIcon,
   ApprovalSurface,
@@ -49,26 +42,14 @@ export default function contribute(client: PluginClientContext) {
     },
   });
 
-  const removeSettingsScreen = registerHelperSettingsScreen(client, approvalSettings, {
+  // Local settings screen (not registerHelperSettingsScreen): the helper renders
+  // string fields as uncontrolled SettingsInput with a stable key, so stored
+  // values arriving after the async get() never populate the inputs.
+  const removeSettingsScreen = client.addSettingsScreen({
     id: "twofado",
     title: "2fado approval",
     icon: "ShieldCheck",
-    ui: { SettingsCard, SettingsSection, SettingsSwitch, SettingsSelect: NotificationTargetSelect, SettingsInput },
-    labels: {
-      socketPath: "2fadod socket",
-      notificationTarget: "Notification target",
-      telegramBotToken: "Telegram bot token",
-      telegramChatId: "Telegram chat ID",
-      telegramApprovers: "Authorized approvers",
-    },
-    descriptions: {
-      socketPath: "Daemon-local path. The app sends it with every call; the server tries it first.",
-      notificationTarget:
-        "Where new requests page: Telegram, Paseo, or Both (default).",
-      telegramBotToken: "Bot token from @BotFather (e.g. 123456:ABC-DEF...). Synced to daemon config.",
-      telegramChatId: "Target Telegram chat or channel ID (e.g. -100123456789 or 12345678).",
-      telegramApprovers: "Comma-separated Telegram usernames authorized to approve (e.g. @alice, @bob).",
-    },
+    Component: TwofadoSettingsScreen,
   });
 
   const buttons = new Map<string, () => void>();
