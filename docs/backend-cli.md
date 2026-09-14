@@ -1,6 +1,6 @@
 # Backend CLI — parity surface for third parties
 
-Status: draft. Source: design report on [Issue #28](https://forge.mrs.aager.de/oktay/2fado/issues/28) (CLI outline §3). Code refs: `go/cmd/2fado/main.go` (subcommands, usage, env), `go/internal/client/client.go` (socket ops, exit codes), `go/internal/protocol/protocol.go` (envelope, request shapes).
+Status: draft. Source: design report on Issue #28 (Forgejo) (CLI outline §3). Code refs: `go/cmd/2fado/main.go` (subcommands, usage, env), `go/internal/client/client.go` (socket ops, exit codes), `go/internal/protocol/protocol.go` (envelope, request shapes).
 
 Third parties should mirror this surface for operator parity. Producer-side ops (`run`/`notify`) vs consumer-side ops (list/verdict/status) — whether both are required is an open question (see `docs/backend-adapter.md`).
 
