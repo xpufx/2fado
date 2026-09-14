@@ -26,6 +26,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Platform, Pressable, Text, View, Animated, Easing } from "react-native";
 import {
+  approvalAck,
   approvalSettings,
   approvalStatus,
   approvalTelegramInfo,
@@ -584,8 +585,156 @@ function ApprovalItem({
   );
 }
 
-function ExecutingItem({
+function NotifyItem({
   item,
+  acking,
+  onAck,
+}: {
+  item: {
+    id: string;
+    link?: string;
+    summary?: string;
+    host: string;
+    caller: string;
+    expiresIn: number;
+  };
+  acking?: boolean;
+  onAck(item: { id: string }): void;
+}) {
+  const { colors } = usePluginTheme();
+  const toast = useToast();
+  const [copied, setCopied] = useState(false);
+  const urgent = item.expiresIn <= EXPIRY_URGENT_S;
+  const fontFamily = Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" });
+
+  const handleCopyLink = async () => {
+    if (!item.link) return;
+    const ok = await copyToClipboard(item.link, { toast, toastMessage: "Link" });
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  return (
+    <Card
+      variant="elevated"
+      style={{
+        borderLeftWidth: 4,
+        borderLeftColor: urgent ? colors.statusDanger : colors.accent,
+        gap: 8,
+        padding: 12,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+          <View
+            style={{
+              width: 22,
+              height: 22,
+              borderRadius: 4,
+              backgroundColor: urgent ? colors.statusDanger : colors.accent,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Icon name="Bell" size={12} color="#ffffff" />
+          </View>
+          <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "700", flex: 1 }}>
+            Action needed
+          </Text>
+        </View>
+        <Badge
+          label={urgent ? `expires in ${item.expiresIn}s` : `${item.expiresIn}s left`}
+          variant={urgent ? "danger" : "accent"}
+          styleVariant="solid"
+          icon="Timer"
+        />
+      </View>
+
+      {item.summary ? (
+        <Text style={{ color: colors.foreground, fontSize: 13 }}>{item.summary}</Text>
+      ) : null}
+
+      {item.link ? (
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            backgroundColor: colors.surface2,
+            borderColor: colors.border,
+            borderWidth: 1,
+            borderRadius: 6,
+            paddingHorizontal: 10,
+            paddingVertical: 6,
+            gap: 8,
+          }}
+        >
+          <Text
+            selectable
+            numberOfLines={2}
+            style={{ color: colors.accent, fontFamily, fontSize: 12, flex: 1 }}
+          >
+            {item.link}
+          </Text>
+          <Pressable
+            onPress={() => void handleCopyLink()}
+            accessibilityRole="button"
+            accessibilityLabel="Copy link"
+            hitSlop={8}
+            style={({ pressed }) => ({
+              padding: 3,
+              borderRadius: 4,
+              backgroundColor: pressed ? colors.surface1 : "transparent",
+            })}
+          >
+            <Icon
+              name={copied ? "Check" : "Copy"}
+              size={13}
+              color={copied ? colors.statusSuccess : colors.foregroundMuted}
+            />
+          </Pressable>
+        </View>
+      ) : null}
+
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: 6,
+        }}
+      >
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+          <Icon name="User" size={11} color={colors.foregroundMuted} />
+          <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>
+            From <Text style={{ color: colors.foreground, fontWeight: "600" }}>{item.caller}</Text> on{" "}
+            <Text style={{ color: colors.foreground, fontWeight: "600" }}>{item.host}</Text>
+          </Text>
+        </View>
+      </View>
+
+      <View style={{ flexDirection: "row", gap: 8, paddingTop: 2 }}>
+        <View style={{ flex: 1 }}>
+          <Button
+            label="Ack"
+            variant="primary"
+            size="sm"
+            icon="Check"
+            accessibilityLabel={`Acknowledge ${item.id}`}
+            loading={acking}
+            disabled={acking}
+            onPress={() => onAck(item)}
+          />
+        </View>
+      </View>
+    </Card>
+  );
+}
+
+function ExecutingItem({  item,
 }: {
   item: {
     id: string;
@@ -701,10 +850,15 @@ function RecentItem({
     output: string;
     step?: "initial" | "confirm";
     confirmOf?: string;
+    kind?: string;
+    link?: string;
+    summary?: string;
   };
 }) {
   const { colors } = usePluginTheme();
-  const approved = item.decision === "approve";
+  const isNotify = item.kind === "notify";
+  const acked = item.decision === "ack";
+  const approved = item.decision === "approve" || acked;
   const executed = item.exit >= 0;
   const failed = executed && item.exit !== 0;
   const isTwoStep = item.step === "confirm" || Boolean(item.confirmOf);
@@ -738,7 +892,7 @@ function RecentItem({
             color={statusColor}
           />
           <Text style={{ color: colors.foreground, fontSize: 13, fontWeight: "600" }}>
-            {program ?? "(empty)"}
+            {isNotify ? (item.summary ?? "(notify)") : (program ?? "(empty)")}
           </Text>
           <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>
             · {item.by ? `by ${item.by}` : "local"}
@@ -749,14 +903,26 @@ function RecentItem({
             <Badge label="2-step" variant="danger" styleVariant="tinted" />
           ) : null}
           <Badge
-            label={approved ? (executed ? `exit ${item.exit}` : "approved") : "denied"}
+            label={
+              acked ? "acked" : approved ? (executed ? `exit ${item.exit}` : "approved") : "denied"
+            }
             variant={approved ? (failed ? "warning" : "success") : "danger"}
             styleVariant="tinted"
           />
         </View>
       </View>
 
-      <CommandBox argv={item.argv} />
+      {isNotify && item.link ? (
+        <Text
+          selectable
+          numberOfLines={2}
+          style={{ color: colors.accent, fontSize: 11, fontFamily }}
+        >
+          {item.link}
+        </Text>
+      ) : null}
+
+      {!isNotify ? <CommandBox argv={item.argv} /> : null}
 
       <KeyValueGroup columns={2}>
         <KeyValue label="By" value={item.by || "local"} />
@@ -835,6 +1001,7 @@ export function ApprovalSurface({
   const recent = useRecentList();
   const socketPath = useSocketPath();
   const decide = useRpc(verdict);
+  const ackNotify = useRpc(approvalAck);
   const getStatus = useRpc(approvalStatus);
   const addRule = useRpc(policyAddRule);
   const queryClient = useQueryClient();
@@ -848,6 +1015,7 @@ export function ApprovalSurface({
   }, []);
 
   const [decidingMap, setDecidingMap] = useState<Record<string, "approve" | "deny">>({});
+  const [ackingMap, setAckingMap] = useState<Record<string, boolean>>({});
   const [policyDialog, setPolicyDialog] = useState<{
     item: { id: string; argv: string[]; cwd: string; preview?: { resolvedBinary?: string } };
     target: "whitelist" | "blacklist";
@@ -1032,9 +1200,40 @@ export function ApprovalSurface({
     }
   };
 
+  const handleAck = async (item: { id: string }) => {
+    const { id } = item;
+    setAckingMap((prev) => ({ ...prev, [id]: true }));
+    try {
+      const res = await ackNotify({ id, socketPath });
+      if (!isMountedRef.current) return;
+      setAckingMap((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      if (!res.acked) {
+        toast.error("Already acked, expired, or 2fadod unreachable.");
+      } else {
+        toast.show("Acknowledged", { variant: "success" });
+      }
+      void queryClient.invalidateQueries({ queryKey: LIST_KEY });
+      void queryClient.invalidateQueries({ queryKey: RECENT_KEY });
+    } catch {
+      if (!isMountedRef.current) return;
+      setAckingMap((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      toast.error("Ack failed — 2fadod unreachable.");
+    }
+  };
+
   useNewPendingToast(query.data?.items);
 
   const items = query.data?.items ?? [];
+  const notifyItems = items.filter((i) => i.kind === "notify");
+  const execItems = items.filter((i) => i.kind !== "notify");
   const rawRecentItems = recent.data?.items ?? [];
 
   // When a 2-step confirmation is in progress, the second approval replaces the first one:
@@ -1176,7 +1375,15 @@ export function ApprovalSurface({
                   description="No commands waiting for authorization."
                 />
               ) : null}
-              {items.map((item) => (
+              {notifyItems.map((item) => (
+                <NotifyItem
+                  key={item.id}
+                  item={item}
+                  acking={ackingMap[item.id]}
+                  onAck={(target) => void handleAck(target)}
+                />
+              ))}
+              {execItems.map((item) => (
                 <ApprovalItem
                   key={item.id}
                   item={item}
