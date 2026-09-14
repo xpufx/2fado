@@ -850,8 +850,17 @@ func (s Service) TelegramSetConfig(req protocol.TelegramSetConfigRequest, caller
 }
 
 // TelegramPump consumes poll results into the store (atomic: one wins).
+// Ack callbacks land on notify petitions via Store.Ack; approve/deny go
+// through the verdict path.
 func (s Service) TelegramPump() {
 	for v := range s.Verdicts {
+		if v.Decision == "ack" {
+			if s.Store.Ack(v.RID, cleanBy("telegram:"+v.By)) {
+				s.Store.Append(protocol.AuditEvent{Ev: "ack", RID: v.RID, By: cleanBy("telegram:" + v.By)})
+				s.closeNotifyCard(v.RID, cleanBy("telegram:"+v.By))
+			}
+			continue
+		}
 		s.Store.Consume(v.RID, v.Decision, v.By)
 	}
 }
