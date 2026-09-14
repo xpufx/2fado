@@ -6,6 +6,7 @@ import {
   approvalStatus,
   approvalTelegramInfo,
   approvalTelegramSetConfig,
+  daemonHealth,
   pendingList,
   policyAddRule,
   recentList,
@@ -13,6 +14,7 @@ import {
 } from "./shared/approval";
 import {
   addPolicyRule,
+  getHealth,
   getStatus,
   getTelegramInfo,
   listPending,
@@ -53,6 +55,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(approvalAck, (input) => submitAck(input));
   server.handle(recentList, (input) => listRecent(input));
   server.handle(approvalStatus, (input) => getStatus(input));
+  server.handle(daemonHealth, (input) => getHealth(input));
   server.handle(approvalTelegramInfo, (input) => getTelegramInfo(input));
   server.handle(approvalTelegramSetConfig, (input) => setTelegramConfig(input));
   server.handle(policyAddRule, (input) => addPolicyRule(input));
