@@ -27,7 +27,7 @@ import {
   setTelegramConfig,
   submitAck,
   submitVerdict,
-} from "./server/fado";
+} from "./server/twofado";
 
 const log = createPluginLogger("twofado");
 
