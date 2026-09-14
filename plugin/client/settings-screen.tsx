@@ -1,10 +1,14 @@
 import { useRpc } from "@getpaseo/plugin/client";
 import { useToast } from "@getpaseo/plugin/client/react-native";
-import { SettingsCard, SettingsInput, SettingsSection } from "@getpaseo/plugin/client/ui";
+import { SettingsCard, SettingsInput, SettingsSection, SettingsSelect } from "@getpaseo/plugin/client/ui";
 import { useEffect, useRef, useState } from "react";
-import { approvalSettings, notificationTargets, type ApprovalSettingsValues } from "../shared/approval";
-import { NotificationTargetSelect } from "./notification-target-select";
+import { approvalSettings, type ApprovalSettingsValues, type NotificationTarget } from "../shared/approval";
 
+const NOTIFICATION_TARGET_LABELS: Record<NotificationTarget, string> = {
+  telegram: "Telegram",
+  paseo: "Paseo",
+  both: "Both",
+};
 const FALLBACK: ApprovalSettingsValues = {
   socketPath: "/tmp/2fado.sock",
   notificationTarget: "both",
@@ -66,11 +70,14 @@ export function TwofadoSettingsScreen() {
           initialValue={draft.socketPath}
           onChangeText={(text) => patch({ socketPath: text })}
         />
-        <NotificationTargetSelect
+        <SettingsSelect
           label="Notification target"
           hint="Where new requests page: Telegram, Paseo, or Both (default)."
           value={draft.notificationTarget}
-          options={notificationTargets.map((target) => ({ label: target, value: target }))}
+          options={(Object.keys(NOTIFICATION_TARGET_LABELS) as NotificationTarget[]).map((target) => ({
+            label: NOTIFICATION_TARGET_LABELS[target],
+            value: target,
+          }))}
           onValueChange={(value) => patch({ notificationTarget: value })}
         />
         <SettingsInput
