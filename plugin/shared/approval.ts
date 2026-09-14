@@ -15,6 +15,12 @@ export const pendingList = defineContract({
         expiresIn: z.number(),
         step: z.enum(["initial", "confirm"]).default("initial"),
         confirmOf: z.string().optional(),
+        kind: z.string().optional(),
+        link: z.string().optional(),
+        summary: z.string().optional(),
+        acked: z.boolean().optional(),
+        ackBy: z.string().optional(),
+        authUrl: z.string().optional(),
         preview: z
           .object({
             resolvedBinary: z.string().optional(),
@@ -42,6 +48,16 @@ export const verdict = defineContract({
   description: "Record an approve/deny verdict for a 2fado request",
 });
 
+export const approvalAck = defineContract({
+  name: "approval.ack",
+  input: z.object({
+    id: z.string().min(1),
+    socketPath: z.string().min(1).optional(),
+  }),
+  output: z.object({ acked: z.boolean() }),
+  description: "Acknowledge a notify-only 2fado petition (non-binding visibility signal)",
+});
+
 export const recentList = defineContract({
   name: "approval.recent",
   input: z.object({
@@ -60,6 +76,12 @@ export const recentList = defineContract({
         output: z.string(),
         step: z.enum(["initial", "confirm"]).optional(),
         confirmOf: z.string().optional(),
+        kind: z.string().optional(),
+        link: z.string().optional(),
+        summary: z.string().optional(),
+        acked: z.boolean().optional(),
+        ackBy: z.string().optional(),
+        authUrl: z.string().optional(),
       }),
     ),
   }),
@@ -84,6 +106,7 @@ export const approvalStatus = defineContract({
       "timeout",
       "client_aborted",
       "confirmation_timeout",
+      "acked",
     ]),
     argv: z.array(z.string()).optional(),
     cwd: z.string().optional(),
@@ -94,6 +117,13 @@ export const approvalStatus = defineContract({
     output: z.string().optional(),
     step: z.string().optional(),
     confirmOf: z.string().optional(),
+    kind: z.string().optional(),
+    link: z.string().optional(),
+    summary: z.string().optional(),
+    acked: z.boolean().optional(),
+    ackBy: z.string().optional(),
+    ackAt: z.number().optional(),
+    authUrl: z.string().optional(),
   }),
   description: "Query status and execution outcome of a 2fado request by ID",
 });
