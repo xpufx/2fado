@@ -371,6 +371,7 @@ async function telegramInfoInner(
     const raw = (await callDaemon(
       { telegram_info: {} },
       input?.socketPath,
+      8000,
     )) as DaemonTelegramInfoResponse;
     const validStatuses = ["connected", "disconnected", "unconfigured", "error"] as const;
     const rawStatus = raw?.status as (typeof validStatuses)[number];
