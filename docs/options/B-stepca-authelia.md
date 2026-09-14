@@ -1,5 +1,9 @@
 # Option B — step-ca (agent identity) + Authelia (SSO gate) + custom UI + 2fadod
 
+> Note (2026-09): pre-PoC research, superseded by the working Go PoC
+> (`docs/poc.md`, `docs/backend-cli.md`). Kept for history; not the
+> current plan.
+
 ## Tool research
 
 **step-ca**: as in Option A — JWK provisioner, `step ca token` →
