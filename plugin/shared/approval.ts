@@ -160,6 +160,17 @@ export const approvalTelegramSetConfig = defineContract({
   description: "Send updated Telegram recipient credentials to 2fadod",
 });
 
+export const daemonHealth = defineContract({
+  name: "approval.health",
+  input: z.object({ socketPath: z.string().min(1).optional() }),
+  output: z.object({
+    reachable: z.boolean(),
+    version: z.string().optional(),
+    pid: z.number().optional(),
+  }),
+  description: "Probe 2fadod reachability via version handshake",
+});
+
 export interface PolicyAddRuleParams {
   target: "whitelist" | "blacklist";
   match_type: "exact" | "base" | "custom";
