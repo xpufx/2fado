@@ -9,9 +9,9 @@ rendered card is paint-only. Design follows from that split.
 ## Goal
 
 Approve/deny pending 2fado requests from inside Paseo. Same verdict
-path as Telegram (one-time tokens into `2fadod`, burned on use,
-fail-closed timeout); new human-only surface. Telegram stays as pager
-fallback until the Paseo path proves itself.
+ path as Telegram (one-time tokens into `2fadod`, burned on use,
+ fail-closed timeout); new human-only surface. Telegram stays as a
+ permanent parallel paging channel alongside the Paseo path.
 
 ## Surfaces (v1)
 
@@ -44,7 +44,7 @@ verdict = defineContract({
     socketPath: z.string().min(1).optional() }),
   output: z.object({ recorded: z.boolean() }),
 });
-// settings: defineSettingsContract (socketPath, telegramFallback),
+// settings: defineSettingsContract (socketPath, notificationTarget),
 // stored daemon-side via PluginStorage, auto-screen via
 // registerHelperSettingsScreen under Settings → Plugins.
 ```
@@ -82,7 +82,8 @@ localhost socket + peercreds as today.
 
 ## Settings screen
 
-Socket path, Telegram-fallback toggle. No names to save — see above.
+Socket path, notification-target selector (Telegram / Paseo / Both).
+ No names to save — see above.
 
 ## MVP scope / non-goals
 
