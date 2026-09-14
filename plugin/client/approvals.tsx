@@ -964,7 +964,7 @@ function RecentItem({
   );
 }
 
-function TelegramStatusBar({ onOpenSettings }: { onOpenSettings(): void }) {
+function TelegramStatusBar() {
   const { colors } = usePluginTheme();
   const tg = useTelegramInfo();
   const info = tg.data;
@@ -989,13 +989,6 @@ function TelegramStatusBar({ onOpenSettings }: { onOpenSettings(): void }) {
             variant={badgeVariant}
             styleVariant="tinted"
           />
-          <Button
-            variant="ghost"
-            size="sm"
-            icon="Settings"
-            accessibilityLabel="Configure Telegram settings"
-            onPress={onOpenSettings}
-          />
         </View>
       </View>
       {(info?.botUsername || info?.chatId) ? (
@@ -1015,8 +1008,7 @@ function TelegramStatusBar({ onOpenSettings }: { onOpenSettings(): void }) {
 function ApprovalSurfaceInner({
   theme,
   layout,
-  onOpenSettings,
-}: PluginSurfaceProps & { onOpenSettings(): void }) {
+}: PluginSurfaceProps) {
   const toast = useToast();
   const query = usePendingList();
   const recent = useRecentList();
@@ -1342,19 +1334,9 @@ function ApprovalSurfaceInner({
             title="2fado approvals"
             subtitle="Privileged command gating"
             icon="ShieldCheck"
-            action={
-              <Button
-                label="Settings"
-                variant="secondary"
-                size="sm"
-                icon="Settings"
-                accessibilityLabel="Open 2fado settings"
-                onPress={onOpenSettings}
-              />
-            }
           />
 
-          <TelegramStatusBar onOpenSettings={onOpenSettings} />
+          <TelegramStatusBar />
 
           <Tabs
             tabs={[
@@ -1388,7 +1370,7 @@ function ApprovalSurfaceInner({
                     </Text>
                   </View>
                   <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, marginTop: 4 }}>
-                    Check the socket path in settings.
+                    Check the 2fadod socket path in daemon config.
                   </Text>
                 </Card>
               ) : null}
@@ -1510,7 +1492,7 @@ function ApprovalSurfaceInner({
   );
 }
 
-export function ApprovalSurface(props: PluginSurfaceProps & { onOpenSettings(): void }) {
+export function ApprovalSurface(props: PluginSurfaceProps) {
   const { theme, layout } = props;
   return (
     <ErrorBoundary
