@@ -1,5 +1,9 @@
 # Comparison
 
+> Note (2026-09): pre-PoC research, superseded by the working Go PoC
+> (`docs/poc.md`, `docs/backend-cli.md`). Kept for history; not the
+> current plan.
+
 Ratings: ✅ meets · ⚠️ partial/needs glue · ❌ misses.
 
 | Requirement | A: step-ca + Authentik | B: step-ca + Authelia | C: Rauthy (+step-ca) | D: privacyIDEA push |
