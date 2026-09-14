@@ -33,16 +33,17 @@ var envDeny = regexp.MustCompile(`^(LD_|GLIBC_|GCONV_|DYLD_|IFS|BASH_FUNC_|BASHO
 const safePath = "/usr/sbin:/usr/bin:/sbin:/bin"
 
 type dynamicState struct {
-	mu          sync.RWMutex
-	cancelPoll  context.CancelFunc
-	botUsername string
-	tgStatus    string // "connected" | "disconnected" | "unconfigured" | "error"
-	tgError     string
-	botToken    string
-	chatID      string
-	approvers   []string
-	approverSet map[string]bool
-	tgClient    telegram.Client
+	mu           sync.RWMutex
+	cancelPoll   context.CancelFunc
+	botUsername  string
+	tgStatus     string // "connected" | "disconnected" | "unconfigured" | "error"
+	tgError      string
+	botToken     string
+	chatID       string
+	approvers    []string
+	approverSet  map[string]bool
+	tgClient     telegram.Client
+	notifyTarget string // "telegram" | "paseo" | "both"
 }
 
 type Service struct {
@@ -61,12 +62,13 @@ func New(c config.Conf) Service {
 	tg := telegram.New(c.BotToken)
 	appSet := c.ApproverSet()
 	st := &dynamicState{
-		botToken:    c.BotToken,
-		chatID:      c.ChatID,
-		approvers:   c.Approvers,
-		approverSet: appSet,
-		tgClient:    tg,
-		tgStatus:    "unconfigured",
+		botToken:     c.BotToken,
+		chatID:       c.ChatID,
+		approvers:    c.Approvers,
+		approverSet:  appSet,
+		tgClient:     tg,
+		tgStatus:     "unconfigured",
+		notifyTarget: config.NormalizeNotificationTarget(c.NotificationTarget),
 	}
 	if !c.Placeholder() {
 		st.tgStatus = "connected"
@@ -338,7 +340,7 @@ func (s Service) confirm(rid1 string, req protocol.RunRequest, uid uint32, clean
 		By:        by,
 	})
 	left := int64(s.Conf.Timeout)
-	if !s.isPlaceholder() && rec1.ChatID != "" {
+	if s.notifyTelegram() && !s.isPlaceholder() && rec1.ChatID != "" {
 		s.activeTG().Edit(rec1.ChatID, rec1.MsgID, telegram.Card(s.Host, req.Argv,
 			uid, req.Cwd, rid, left, "confirm", by, s.Conf.DryRun),
 			telegram.Buttons(rid))
@@ -418,7 +420,7 @@ func (s Service) runApproved(rid string, req protocol.RunRequest, uid uint32, cl
 // otherwise. The agent never sees credentials; only the link to the
 // registry's own ceremony page.
 func (s Service) notifyAuthURL(rid string, req protocol.RunRequest, authURL string) {
-	if s.isPlaceholder() {
+	if !s.notifyTelegram() || s.isPlaceholder() {
 		fmt.Printf("[pager:stdout] auth required for %s: %s\n", rid, authURL)
 		return
 	}
@@ -483,7 +485,11 @@ func (s Service) adoptOne(rid string, rec protocol.PendingRecord) {
 }
 
 // List answers the plugin server's poll: pending, unexpired, undecided.
+// A telegram-only target pages nothing into Paseo, so the list stays empty.
 func (s Service) List() protocol.PendingList {
+	if !s.notifyPaseo() {
+		return protocol.PendingList{Items: []protocol.PendingItem{}}
+	}
 	items := s.Store.List(time.Now().Unix())
 	if items == nil {
 		items = []protocol.PendingItem{}
@@ -585,6 +591,26 @@ func (s Service) getState() *dynamicState {
 	return s.state
 }
 
+// notifyTarget resolves the effective paging target: live-synced state
+// first, static config second, both by default.
+func (s Service) notifyTarget() string {
+	if s.state != nil {
+		s.state.mu.RLock()
+		target := s.state.notifyTarget
+		s.state.mu.RUnlock()
+		if target != "" {
+			return config.NormalizeNotificationTarget(target)
+		}
+	}
+	return config.NormalizeNotificationTarget(s.Conf.NotificationTarget)
+}
+
+// notifyTelegram reports whether new requests page over Telegram.
+func (s Service) notifyTelegram() bool { return s.notifyTarget() != "paseo" }
+
+// notifyPaseo reports whether new requests page into Paseo (list poll).
+func (s Service) notifyPaseo() bool { return s.notifyTarget() != "telegram" }
+
 func (s Service) isPlaceholder() bool {
 	if s.state != nil {
 		s.state.mu.RLock()
@@ -639,21 +665,19 @@ func (s Service) activeTG() telegram.Client {
 func (s Service) page(rid string, req protocol.RunRequest, uid uint32) {
 	text := telegram.Card(s.Host, req.Argv, uid, req.Cwd, rid,
 		int64(s.Conf.Timeout), "", "", s.Conf.DryRun)
-	if s.isPlaceholder() {
-		fmt.Printf("[pager:stdout] approve: 2fado approve %s\n%s\n", rid, text)
-		return
+	if s.notifyTelegram() && !s.isPlaceholder() {
+		cid := s.activeChatID()
+		tg := s.activeTG()
+		if mid, err := tg.Send(cid, text, rid); err == nil {
+			s.Store.AttachPager(rid, cid, mid)
+			return
+		}
 	}
-	cid := s.activeChatID()
-	tg := s.activeTG()
-	if mid, err := tg.Send(cid, text, rid); err == nil {
-		s.Store.AttachPager(rid, cid, mid)
-	} else {
-		fmt.Printf("[pager:stdout] approve: 2fado approve %s\n%s\n", rid, text)
-	}
+	fmt.Printf("[pager:stdout] approve: 2fado approve %s\n%s\n", rid, text)
 }
 
 func (s Service) closeCard(rid string, req protocol.RunRequest, uid uint32, decision string, by string) {
-	if s.isPlaceholder() {
+	if !s.notifyTelegram() || s.isPlaceholder() {
 		return
 	}
 	rec, err := s.Store.Load(rid)
@@ -689,9 +713,10 @@ func (s Service) StartTelegram(ctx context.Context) {
 func (s Service) TelegramInfo() protocol.TelegramInfoResponse {
 	if s.state == nil {
 		return protocol.TelegramInfoResponse{
-			Configured: false,
-			Status:     "unconfigured",
-			Approvers:  []string{},
+			Configured:         false,
+			Status:             "unconfigured",
+			Approvers:          []string{},
+			NotificationTarget: s.notifyTarget(),
 		}
 	}
 
@@ -702,24 +727,27 @@ func (s Service) TelegramInfo() protocol.TelegramInfoResponse {
 	if approvers == nil {
 		approvers = []string{}
 	}
+	target := config.NormalizeNotificationTarget(s.state.notifyTarget)
 
 	if s.state.botToken == "" || strings.HasPrefix(s.state.botToken, "__") {
 		return protocol.TelegramInfoResponse{
-			Configured: false,
-			Status:     "unconfigured",
-			ChatID:     s.state.chatID,
-			Approvers:  approvers,
+			Configured:         false,
+			Status:             "unconfigured",
+			ChatID:             s.state.chatID,
+			Approvers:          approvers,
+			NotificationTarget: target,
 		}
 	}
 
 	if s.state.tgStatus == "connected" && s.state.botUsername != "" {
 		return protocol.TelegramInfoResponse{
-			Configured:  true,
-			BotUsername: s.state.botUsername,
-			ChatID:      s.state.chatID,
-			Approvers:   approvers,
-			Status:      s.state.tgStatus,
-			Error:       s.state.tgError,
+			Configured:         true,
+			BotUsername:        s.state.botUsername,
+			ChatID:             s.state.chatID,
+			Approvers:          approvers,
+			Status:             s.state.tgStatus,
+			Error:              s.state.tgError,
+			NotificationTarget: target,
 		}
 	}
 
@@ -743,12 +771,13 @@ func (s Service) TelegramInfo() protocol.TelegramInfoResponse {
 	}
 
 	return protocol.TelegramInfoResponse{
-		Configured:  true,
-		BotUsername: s.state.botUsername,
-		ChatID:      s.state.chatID,
-		Approvers:   approvers,
-		Status:      s.state.tgStatus,
-		Error:       s.state.tgError,
+		Configured:         true,
+		BotUsername:        s.state.botUsername,
+		ChatID:             s.state.chatID,
+		Approvers:          approvers,
+		Status:             s.state.tgStatus,
+		Error:              s.state.tgError,
+		NotificationTarget: target,
 	}
 }
 
@@ -763,6 +792,14 @@ func (s Service) TelegramSetConfig(req protocol.TelegramSetConfigRequest, caller
 	}
 
 	st := s.state
+	target := s.notifyTarget()
+	if strings.TrimSpace(req.NotificationTarget) != "" {
+		trimmed := strings.ToLower(strings.TrimSpace(req.NotificationTarget))
+		if trimmed != "telegram" && trimmed != "paseo" && trimmed != "both" {
+			return protocol.TelegramSetConfigResponse{Success: false, Error: "invalid notification_target (want telegram|paseo|both)"}
+		}
+		target = trimmed
+	}
 	var token string
 	if req.BotToken != nil {
 		token = strings.TrimSpace(*req.BotToken)
@@ -800,9 +837,10 @@ func (s Service) TelegramSetConfig(req protocol.TelegramSetConfigRequest, caller
 		approvers = []string{}
 	}
 	userCfg := config.UserConfig{
-		BotToken:  token,
-		ChatID:    strings.TrimSpace(req.ChatID),
-		Approvers: approvers,
+		BotToken:           token,
+		ChatID:             strings.TrimSpace(req.ChatID),
+		Approvers:          approvers,
+		NotificationTarget: target,
 	}
 	if err := config.SaveUserConfig(userCfg); err != nil {
 		return protocol.TelegramSetConfigResponse{
@@ -822,6 +860,7 @@ func (s Service) TelegramSetConfig(req protocol.TelegramSetConfigRequest, caller
 	s.state.botToken = token
 	s.state.chatID = userCfg.ChatID
 	s.state.approvers = userCfg.Approvers
+	s.state.notifyTarget = target
 	appSet := map[string]bool{}
 	for _, a := range userCfg.Approvers {
 		if a = strings.TrimSpace(a); a != "" {
