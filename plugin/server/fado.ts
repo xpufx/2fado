@@ -168,7 +168,7 @@ async function listPendingInner(
   return {
     items: items.map((item) => ({
       id: item.id,
-      argv: item.argv,
+      argv: Array.isArray(item.argv) ? item.argv : [],
       host,
       caller: String(item.uid),
       cwd: item.cwd,
