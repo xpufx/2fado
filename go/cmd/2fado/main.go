@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"2fado/internal/client"
 	"2fado/internal/config"
@@ -27,7 +28,7 @@ var (
 )
 
 func usage() int {
-	fmt.Println("usage: 2fado daemon | 2fado run -- <argv...> | 2fado approve|deny <id> | 2fado status <id> | 2fado version")
+	fmt.Println("usage: 2fado daemon | 2fado run -- <argv...> | 2fado approve|deny <id> | 2fado notify --link <url> --summary <text> [--ttl <dur>] | 2fado ack <id> | 2fado status <id> | 2fado version")
 	return 2
 }
 
@@ -51,6 +52,48 @@ func binarySHA256() string {
 func printVersion() int {
 	fmt.Printf("version: %s\ncommit: %s\nbuild_time: %s\nsha256: %s\n", Version, GitCommit, BuildTime, binarySHA256())
 	return 0
+}
+
+// notifyCmd parses: 2fado notify --link <url> --summary <text> [--ttl <dur>].
+func notifyCmd(sock string, args []string) int {
+	var link, summary, ttlStr string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--link":
+			if i+1 >= len(args) {
+				return usage()
+			}
+			i++
+			link = args[i]
+		case "--summary":
+			if i+1 >= len(args) {
+				return usage()
+			}
+			i++
+			summary = args[i]
+		case "--ttl":
+			if i+1 >= len(args) {
+				return usage()
+			}
+			i++
+			ttlStr = args[i]
+		default:
+			return usage()
+		}
+	}
+	if link == "" || summary == "" {
+		return usage()
+	}
+	var ttlSeconds int64
+	if ttlStr != "" {
+		d, err := time.ParseDuration(ttlStr)
+		if err != nil || d <= 0 {
+			fmt.Fprintln(os.Stderr, "2fado: bad --ttl (try 30m, 2h, 24h)")
+			return 2
+		}
+		ttlSeconds = int64(d / time.Second)
+	}
+	return client.Notify(sock, link, summary, ttlSeconds)
 }
 
 func main() {
@@ -97,6 +140,13 @@ func main() {
 			os.Exit(usage())
 		}
 		os.Exit(client.Verdict(sock, os.Args[1], os.Args[2]))
+	case "notify":
+		os.Exit(notifyCmd(sock, os.Args[2:]))
+	case "ack":
+		if len(os.Args) != 3 {
+			os.Exit(usage())
+		}
+		os.Exit(client.Ack(sock, os.Args[2]))
 	case "status":
 		if len(os.Args) != 3 {
 			os.Exit(usage())
