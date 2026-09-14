@@ -1,5 +1,5 @@
-// Package config loads daemon configuration: file first, FADO_ env
-// overrides second. Placeholders (BOT_TOKEN starting with "__") select
+// Package config loads daemon configuration: file first, TWOFADO_ env
+// overrides second (legacy FADO_ fallback). Placeholders (BOT_TOKEN starting with "__") select
 // the stdout pager instead of Telegram.
 package config
 
