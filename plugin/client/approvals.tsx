@@ -30,6 +30,7 @@ import {
   approvalSettings,
   approvalStatus,
   approvalTelegramInfo,
+  daemonHealth,
   pendingList,
   policyAddRule,
   recentList,
@@ -112,6 +113,7 @@ export function useRecentList() {
 }
 
 const TELEGRAM_KEY = ["twofado", "telegram"];
+const HEALTH_KEY = ["twofado", "health"];
 
 export function useTelegramInfo() {
   const getTelegram = useRpc(approvalTelegramInfo);
@@ -124,22 +126,42 @@ export function useTelegramInfo() {
   });
 }
 
+export function useDaemonHealth() {
+  const probe = useRpc(daemonHealth);
+  const socketPath = useSocketPath();
+  return useQuery({
+    queryKey: [...HEALTH_KEY, socketPath ?? ""],
+    queryFn: async () => {
+      try {
+        return await probe({ socketPath });
+      } catch {
+        return { reachable: false as const };
+      }
+    },
+    refetchInterval: POLL_MS,
+    retry: false,
+  });
+}
+
 export function ApprovalHeaderIcon(props: PluginButtonIconProps) {
   const { theme } = props;
   const workspaceId = props.workspaceId;
   const size = props.size;
   const color = props.color;
   const { data } = usePendingList();
+  const health = useDaemonHealth();
+  const down = health.data ? !health.data.reachable : health.isError;
   const count = data?.items.length ?? 0;
   const hasConfirm = data?.items.some((item) => item.step === "confirm") ?? false;
 
   useNewPendingToast(data?.items);
 
   const prevCountRef = useRef<number | null>(null);
+  const prevDownRef = useRef<boolean | null>(null);
   const pulse = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    if (count === 0) {
+    if (down || count === 0) {
       pulse.setValue(1);
       return;
     }
@@ -161,11 +183,12 @@ export function ApprovalHeaderIcon(props: PluginButtonIconProps) {
     );
     loop.start();
     return () => loop.stop();
-  }, [count, pulse]);
+  }, [count, down, pulse]);
 
   useEffect(() => {
-    if (prevCountRef.current === count) return;
+    if (prevCountRef.current === count && prevDownRef.current === down) return;
     prevCountRef.current = count;
+    prevDownRef.current = down;
     // Defer the button store update out of the render/commit phase
     let interval: ReturnType<typeof setInterval> | undefined;
     const timer = setTimeout(() => {
@@ -178,6 +201,10 @@ export function ApprovalHeaderIcon(props: PluginButtonIconProps) {
           console.warn("[2fado] Failed to update header button label:", err);
         }
       };
+      if (down) {
+        show("2fadod down");
+        return;
+      }
       if (count === 0) {
         show(undefined);
         return;
@@ -196,9 +223,11 @@ export function ApprovalHeaderIcon(props: PluginButtonIconProps) {
       clearTimeout(timer);
       if (interval) clearInterval(interval);
     };
-  }, [workspaceId, count]);
+  }, [workspaceId, count, down]);
 
-  const activeColor = count > 0
+  const activeColor = down
+    ? theme.colors.statusDanger || "#ef4444"
+    : count > 0
     ? hasConfirm
       ? theme.colors.statusDanger || "#ef4444"
       : theme.colors.statusWarning || "#f59e0b"
@@ -208,7 +237,7 @@ export function ApprovalHeaderIcon(props: PluginButtonIconProps) {
     <PluginThemeProvider theme={{ colors: theme.colors }}>
       <Animated.View style={{ width: size, height: size, alignItems: "center", justifyContent: "center", opacity: pulse }}>
         <Icon
-          name="ShieldCheck"
+          name={down ? "ShieldAlert" : "ShieldCheck"}
           size={size}
           color={activeColor}
         />
