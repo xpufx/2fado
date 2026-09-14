@@ -25,6 +25,15 @@ type VerdictSubmit struct {
 	By       string `json:"by,omitempty"`
 }
 
+// ErrorResponse is the transport-level error envelope. The daemon
+// writes it when no typed response applies: malformed, oversized, or
+// timed-out framing, unknown message kinds, or un-marshalable domain
+// replies. Typed clients treat any {"error":...} reply as failure and
+// surface the string; they never mistake it for success.
+type ErrorResponse struct {
+	Error string `json:"error"`
+}
+
 // ClientMessage is the socket envelope: exactly one field is set.
 type ClientMessage struct {
 	Run               *RunRequest               `json:"run,omitempty"`
