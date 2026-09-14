@@ -1,5 +1,9 @@
 # Recommendation: Option B — step-ca + Authelia (+ `2fadod` + tiny UI + pager)
 
+> Note (2026-09): pre-PoC research, superseded by the working Go PoC
+> (`docs/poc.md`, `docs/backend-cli.md`). Kept for history; not the
+> current plan.
+
 ## Why B wins
 
 Against the actual requirements (spec.md), A/B/C tie on every security
