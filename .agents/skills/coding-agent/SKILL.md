@@ -122,7 +122,7 @@ Defined in [`.forgejo/labels/agent-workflow.yaml`](file:///.forgejo/labels/agent
 - **`format/` Scope**: `format/0-needed` ↔ `format/1-ok` (cleaning presentation and applying `format/1-ok` automatically clears `format/0-needed`).
 - **`spec/` Scope**: `spec/0-needed` → `spec/1-checklist` → `spec/2-approved` (shaping phase transitions automatically clear previous stages).
 - **`state/` Scope**: `state/0-triage` → `state/1-wip` → `state/2-review` → `state/3-verify` → `state/4-done` (execution lifecycle).
-- **`attention/` Scope**: `attention/0-agent` ↔ `attention/1-user` ↔ `attention/2-ignore` (action token).
+- **`attention/` Scope**: `attention/0-orchestrator` ↔ `attention/1-agent` ↔ `attention/2-user` ↔ `attention/3-ignore` (action token).
 - **`priority/` Scope**: `priority/0-SOS` ↔ `priority/1-high` ↔ `priority/2-normal` ↔ `priority/3-low` ↔ `priority/4-backburner`.
 
 ### Board Prioritization & Intelligence Model
@@ -145,31 +145,66 @@ Agents and Orchestrators evaluate the board using a two-step approach:
 ## 6. Task Execution Lifecycle
 
 ### Step 1: Discover & Claim Work
-1. Look for unblocked issues tagged **`attention/agent`** (available task) or urgent **`priority/SOS`**.
+1. Look for unblocked issues tagged **`attention/1-agent`** (available task) or urgent **`priority/0-SOS`**.
 2. **Mandatory Full Ticket & History Audit**:
    - **Read the entire ticket**: Never assume you know the scope from the title or prior memory. The issue body may have been rewritten, amended, or contain crucial boundary constraints.
    - **Read the ENTIRE comment thread**: Human operators frequently modify scope (e.g. *"SKIP step 2"*, *"Do not touch X"*, *"Focus only on Y"*), or another agent might have added crucial context or warnings. Blindly executing a plan without verifying the latest comment thread is a critical protocol violation.
 3. If the issue has **`upstream-check`**, first audit upstream Paseo repositories/docs to inform your approach.
 4. Check issue comments to verify no other agent has already claimed it.
 5. Post an Agent Envelope comment announcing your claim.
-6. **Attach the `state/wip` label immediately** (e.g. `fgjx issue edit <number> --add-label state/wip`). Because `state/` is an exclusive scope, applying `state/wip` automatically clears any prior state like `state/triage` without needing removal flags.
+6. **Attach the `state/1-wip` label immediately** (e.g. `fgjx issue edit <number> --add-label state/1-wip`). Because `state/` is an exclusive scope, applying `state/1-wip` automatically clears any prior state like `state/0-triage` without needing removal flags.
 
 ### Step 2: Implementation Guidelines
-- **Autonomous Execution (`attention/agent`, `cheap`):**
+- **Autonomous Execution (`attention/1-agent`, `size/0-cheap`):**
   Work quietly in your designated worktree/checkout without spamming chat.
+
+#### Mandatory: Paseo Plugin Helper UI Standards (Never Bespoke Raw React Native)
+When building or modifying client UI in Paseo plugins:
+1. **Reference Gold Standard**: Inspect `plugins/mcp-tools` as the canonical reference implementation. It adheres to all `paseo-plugin-helper` UI patterns.
+2. **Never Handroll Bespoke UI Primitives**:
+   - **Do NOT hardcode modal dimensions**: Never set `minWidth: 460`, `minHeight`, or fixed widths on `<ModalBody>` or modal containers. Modals must be 100% fluid and adapt to whatever dialog width Paseo allocates.
+   - **Do NOT roll custom buttons or selectors using `<Pressable>`**: Use `Button`, `Tabs`, or `FormRow` containing `Button` variants (`variant="primary" | "ghost" | "secondary"`).
+   - **Do NOT roll custom form rows or setting switches**: Use `<FormRow label="..." description="...">` wrapping `<Toggle>` or `<TextInput>`.
+   - **Do NOT roll custom card borders or headers**: Use `<Card variant="elevated">`, `<Card.Header title="..." subtitle="..." />`, or `<SectionHeader>`.
+   - **Do NOT roll custom key/value displays**: Use `<KeyValueGroup>` and `<KeyValue>` (or `CompactKeyValue`).
+   - **Do NOT roll custom empty or status indicators**: Use `<EmptyState>` and `<StatusDot>`.
+3. **Available Helper Client Palette**: Exported from `paseo-plugin-helper/client`:
+   - **Layout**: `ModalBody`, `ActionBar`, `FormRow`
+   - **Components**: `Card`, `Tabs`, `Button`, `Toggle`, `TextInput`, `Badge`, `StatusDot`, `KeyValue`, `KeyValueGroup`, `Collapsible`, `SectionHeader`, `CommandBox`, `AttentionBeacon`, `CodeBlock`, `SearchInput`, `EmptyState`, `ProgressBar`, `MetricGauge`, `DataTable`, `TruncatedText`, `AboutSection`, `Icon`
+4. **Audit Before Delivery**:
+   - Run `./packages/paseo-plugin-helper/bin/paseo-plugin-helper.js audit <plugin-path>` to catch anti-patterns.
+
 - **Verification:** Run typechecks (`npm run typecheck`), linters, and test suites locally before claiming completion.
 
-### Step 3: Handoff to `Orchestrator` (`state/ready-for-review` or `state/verify`)
+### Step 3: Handoff to `Orchestrator` (`state/2-review` or `state/3-verify`)
 When code is implemented and verified locally:
-1. Push your branch/commits.
-2. Post a completion comment with your **Agent Envelope** (`fgjx issue comment <number> --envelope -b ...`).
+1. Push your branch/commits to `origin`.
+2. **Mandatory Live Freshness Sync**: Run `npm run doctor:live -- --reload`.
+   - Ensures `packages/paseo-plugin-helper/dist` is compiled and in sync.
+   - Automatically stamps the latest commit into `shared/version.ts`.
+   - Reloads the live Paseo daemon for your plugin (`paseo plugin reload <id>`).
+   - Verifies the daemon is actively running your latest commit before asking the operator to test.
+3. Post a completion comment with your **Agent Envelope** (`fgjx issue comment <number> --envelope -b ...`).
    - **Strict Formatting Standard**: Never dump an unformatted, narrative wall of text. Use clean GitHub-flavored markdown with structured headers (`### Implementation Summary`), bulleted deliverables, explicit code host/repo/branch/SHA, and test results.
    - Summary of changes implemented.
    - Updated checklist showing completed items.
    - Branch name and commit hash(es).
    - Confirmation that typechecks and tests passed.
-3. **Transition the state**: Apply **`state/ready-for-review`** (for Orchestrator review) or **`state/verify`** (for on-device/human testing).
-   - Command: `fgjx issue edit <number> --add-label state/ready-for-review` (or `--add-label state/verify`).
-   - **Automatic Eviction**: Because `state/` is exclusive, adding `state/ready-for-review` or `state/verify` automatically removes `state/wip` at the database level.
-4. **Do NOT close the issue**: Agents and the Orchestrator do not close issues upon completion. The issue must remain `open` with `state/verify` (and/or `state/ready-for-review`) attached so the human operator can verify and close it.
+   - **Deployment & Verification Status block**:
+     ```markdown
+     ### 🚀 Deployment & Verification Status
+     - **Commit**: `<sha>` on `origin/<branch>`
+     - **Live Doctor**: Passed (`npm run doctor:live`)
+     - **Daemon Status**: Reloaded (`paseo plugin reload <id>`)
+     - **Client Action**: Re-open the modal/surface (or press Ctrl+R / Cmd+R in Paseo if window is open).
+     ```
+3. **Transition the state**: Apply **`state/2-review`** and `review/0-needed` (or **`state/3-verify`** if delivering directly for user verification).
+   - Command: `fgjx issue edit <number> --add-label state/2-review --add-label review/0-needed` (or `fgjx issue edit <number> --add-label state/3-verify`).
+   - **Automatic Eviction**: Because `state/` and `review/` are exclusive scopes, this clears prior states automatically.
+   - **Operator verdict**: `review/2-approved` means advance to `state/3-verify`; `review/1-changes-requested` means return to `state/1-wip`.
+
+   > [!CAUTION]
+   > **MANDATORY LABEL UPDATE**: You MUST execute `fgjx issue edit <number> --add-label ...`. Merely posting an envelope comment without executing the label update command leaves the issue stranded in its old state on the board.
+
+4. **Do NOT close the issue**: Agents and the Orchestrator do not close issues upon completion. The issue must remain `open` so the human operator can verify and close it.
 5. Stand by for fast review from the `Orchestrator` or testing by human user `oktay`.
