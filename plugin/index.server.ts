@@ -1,6 +1,7 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { PluginStorage, createPluginLogger, registerSettingsRpc } from "paseo-plugin-helper/server";
 import {
+  approvalAck,
   approvalSettings,
   approvalStatus,
   approvalTelegramInfo,
@@ -17,6 +18,7 @@ import {
   listPending,
   listRecent,
   setTelegramConfig,
+  submitAck,
   submitVerdict,
 } from "./server/fado";
 
@@ -48,6 +50,7 @@ export default function contribute(server: PluginServerContext) {
   });
   server.handle(pendingList, (input) => listPending(input));
   server.handle(verdict, (input) => submitVerdict(input));
+  server.handle(approvalAck, (input) => submitAck(input));
   server.handle(recentList, (input) => listRecent(input));
   server.handle(approvalStatus, (input) => getStatus(input));
   server.handle(approvalTelegramInfo, (input) => getTelegramInfo(input));
