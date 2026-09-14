@@ -38,8 +38,9 @@ function migrateLegacySettingsFile(storage: PluginStorage<ApprovalSettingsValues
     if (!changed) return;
     fs.writeFileSync(storage.filePath, JSON.stringify(data, null, 2));
     log.info("migrated legacy telegramFallback to notificationTarget");
-  } catch {
+  } catch (err) {
     // Missing or unreadable file: schema defaults apply.
+    log.warn("legacy settings migration skipped", { error: err });
   }
 }
 
@@ -76,7 +77,10 @@ export default function contribute(server: PluginServerContext) {
         }).catch((err) => log.warn("failed to sync telegram config to daemon", { error: err }));
       } else if (prev && next.notificationTarget !== prev.notificationTarget) {
         void (async () => {
-          const info = await getTelegramInfo({ socketPath: next.socketPath }).catch(() => undefined);
+          const info = await getTelegramInfo({ socketPath: next.socketPath }).catch((err) => {
+            log.warn("telegram info fetch failed during target sync", { error: err });
+            return undefined;
+          });
           await setTelegramConfig({
             chatId: info?.chatId,
             approvers: info?.approvers,
