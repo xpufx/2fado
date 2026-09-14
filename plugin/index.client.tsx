@@ -53,10 +53,8 @@ export default function contribute(client: PluginClientContext) {
   });
 
   const buttons = new Map<string, () => void>();
-  const unsubscribe = client.paseo.agents.subscribe((update) => {
-    if (update.kind !== "upsert" || !update.agent.workspaceId) return;
-    const { workspaceId } = update.agent;
-    if (buttons.has(workspaceId)) return;
+  const addButton = (workspaceId: string) => {
+    if (!workspaceId || buttons.has(workspaceId)) return;
     const registration = client.addHeaderButton({
       id: "twofado",
       workspaceId,
@@ -71,7 +69,28 @@ export default function contribute(client: PluginClientContext) {
       registration.remove();
     });
     trackHeaderButton(workspaceId, registration);
+  };
+  const unsubscribe = client.paseo.agents.subscribe((update) => {
+    if (update.kind !== "upsert" || !update.agent.workspaceId) return;
+    addButton(update.agent.workspaceId);
   });
+  // Register buttons for agents already present: subscribe only fires on
+  // future upserts, so without this the icon is missing after a Paseo
+  // restart until the next agent event — including when the daemon is down
+  // and the red down-state should be showing.
+  void Promise.resolve()
+    .then(() => client.paseo.agents.list())
+    .then(
+      (res) => {
+        const agents = Array.isArray((res as { agents?: unknown }).agents)
+          ? (res as { agents: Array<{ workspaceId?: unknown }> }).agents
+          : [];
+        for (const agent of agents) {
+          if (typeof agent?.workspaceId === "string") addButton(agent.workspaceId);
+        }
+      },
+      (err) => console.warn("[2fado] Failed to list agents for header buttons:", err),
+    );
 
   return () => {
     unsubscribe();
