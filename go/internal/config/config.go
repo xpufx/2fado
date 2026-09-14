@@ -12,22 +12,35 @@ import (
 )
 
 type Conf struct {
-	BotToken   string
-	Approvers  []string
-	ChatID     string
-	Socket     string
-	StateDir   string
-	Policy     string
-	Timeout    int
-	DryRun     bool
-	ConfirmAll bool
-	Pager      string
+	BotToken           string
+	Approvers          []string
+	ChatID             string
+	Socket             string
+	StateDir           string
+	Policy             string
+	Timeout            int
+	DryRun             bool
+	ConfirmAll         bool
+	Pager              string
+	NotificationTarget string
 }
 
 type UserConfig struct {
-	BotToken  string   `json:"bot_token,omitempty"`
-	ChatID    string   `json:"chat_id,omitempty"`
-	Approvers []string `json:"approvers,omitempty"`
+	BotToken           string   `json:"bot_token,omitempty"`
+	ChatID             string   `json:"chat_id,omitempty"`
+	Approvers          []string `json:"approvers,omitempty"`
+	NotificationTarget string   `json:"notification_target,omitempty"`
+}
+
+// NormalizeNotificationTarget folds a raw target value onto the
+// supported set (telegram|paseo|both), defaulting to both.
+func NormalizeNotificationTarget(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "telegram", "paseo", "both":
+		return strings.ToLower(strings.TrimSpace(raw))
+	default:
+		return "both"
+	}
 }
 
 // GetEnvWithFallback returns the value of the first non-empty environment variable
@@ -134,6 +147,11 @@ func Load(path string) Conf {
 		Timeout:  300,
 		Pager:    get("PAGER", ""),
 	}
+	target := get("NOTIFICATION_TARGET", "")
+	if target == "" {
+		target = userCfg.NotificationTarget
+	}
+	c.NotificationTarget = NormalizeNotificationTarget(target)
 	approversStr := get("APPROVERS", "", "APPROVERS")
 	for _, a := range strings.Split(approversStr, ",") {
 		if a = strings.TrimSpace(a); a != "" && !strings.HasPrefix(a, "__") {
