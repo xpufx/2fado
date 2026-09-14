@@ -8,6 +8,7 @@ import {
   approvalStatus,
   approvalTelegramInfo,
   approvalTelegramSetConfig,
+  daemonHealth,
   pendingList,
   policyAddRule,
   recentList,
@@ -444,6 +445,37 @@ export const setTelegramConfig = guardRpcHandler(telegramSetConfigInner, {
   maxInflight: 4,
   onTimeout: (info) => log.warn("telegram set config timed out", info),
   onSaturated: (info) => log.warn("telegram set config saturated, shedding load", info),
+});
+
+interface DaemonVersionResponse {
+  version?: string;
+  git_commit?: string;
+  build_time?: string;
+  binary_sha256?: string;
+  pid?: number;
+}
+
+async function healthInner(
+  input?: RpcInput<typeof daemonHealth>,
+): Promise<RpcOutput<typeof daemonHealth>> {
+  try {
+    const raw = (await callDaemon({ version: {} }, input?.socketPath, 1500)) as DaemonVersionResponse;
+    return {
+      reachable: true,
+      version: typeof raw?.version === "string" ? raw.version : undefined,
+      pid: typeof raw?.pid === "number" ? raw.pid : undefined,
+    };
+  } catch (err) {
+    log.warn("health probe failed", { error: err });
+    return { reachable: false };
+  }
+}
+
+export const getHealth = guardRpcHandler(healthInner, {
+  timeoutMs: 5000,
+  maxInflight: 4,
+  onTimeout: (info) => log.warn("health timed out", info),
+  onSaturated: (info) => log.warn("health saturated, shedding load", info),
 });
 
 export class FadoClient {
