@@ -29,6 +29,8 @@ type VerdictSubmit struct {
 type ClientMessage struct {
 	Run               *RunRequest               `json:"run,omitempty"`
 	Verdict           *VerdictSubmit            `json:"verdict,omitempty"`
+	Notify            *NotifyRequest            `json:"notify,omitempty"`
+	Ack               *AckSubmit                `json:"ack,omitempty"`
 	List              *ListRequest              `json:"list,omitempty"`
 	Recent            *RecentRequest            `json:"recent,omitempty"`
 	Status            *StatusRequest            `json:"status,omitempty"`
@@ -36,6 +38,29 @@ type ClientMessage struct {
 	TelegramSetConfig *TelegramSetConfigRequest `json:"telegram_set_config,omitempty"`
 	PolicyAddRule     *PolicyAddRuleRequest     `json:"policy_add_rule,omitempty"`
 	Version           *VersionRequest           `json:"version,omitempty"`
+}
+
+// NotifyRequest asks the daemon to create a no-exec notify-only petition:
+// a human-presence step (2FA link, staged approval, FYI+ack) with no
+// command execution. Link is the clickable URL, Summary is short operator
+// text, TTLSeconds overrides the default long TTL (0 = default).
+type NotifyRequest struct {
+	Link       string `json:"link"`
+	Summary    string `json:"summary"`
+	TTLSeconds int64  `json:"ttl_seconds,omitempty"`
+}
+
+// AckSubmit records a non-binding operator acknowledgement on a notify
+// petition ("seen + acted"). By names the acker; daemon sanitizes it.
+type AckSubmit struct {
+	ID string `json:"id"`
+	By string `json:"by,omitempty"`
+}
+
+// AckResponse answers an AckSubmit.
+type AckResponse struct {
+	Acked bool   `json:"acked"`
+	Error string `json:"error,omitempty"`
 }
 
 type VersionRequest struct{}
@@ -107,7 +132,7 @@ type StatusRequest struct {
 }
 
 // StatusResponse is the answer to a StatusRequest.
-// Status is one of: not_found | pending | confirming | running | completed | denied | timeout | client_aborted.
+// Status is one of: not_found | pending | confirming | running | completed | denied | timeout | client_aborted | acked.
 type StatusResponse struct {
 	ID        string         `json:"id"`
 	Status    string         `json:"status"`
@@ -123,6 +148,12 @@ type StatusResponse struct {
 	ConfirmOf string         `json:"confirm_of,omitempty"`
 	Preview   *PreviewRecord `json:"preview,omitempty"`
 	AuthURL   string         `json:"auth_url,omitempty"`
+	Kind      string         `json:"kind,omitempty"`
+	Link      string         `json:"link,omitempty"`
+	Summary   string         `json:"summary,omitempty"`
+	Acked     bool           `json:"acked,omitempty"`
+	AckBy     string         `json:"ack_by,omitempty"`
+	AckAt     int64          `json:"ack_at,omitempty"`
 }
 
 // ListRequest asks for pending records (plugin server polls this).
@@ -139,6 +170,11 @@ type PendingItem struct {
 	ConfirmOf string         `json:"confirm_of,omitempty"`
 	Preview   *PreviewRecord `json:"preview,omitempty"`
 	AuthURL   string         `json:"auth_url,omitempty"`
+	Kind      string         `json:"kind,omitempty"`
+	Link      string         `json:"link,omitempty"`
+	Summary   string         `json:"summary,omitempty"`
+	Acked     bool           `json:"acked,omitempty"`
+	AckBy     string         `json:"ack_by,omitempty"`
 }
 
 // PendingList answers ListRequest: unexpired, undecided records only.
@@ -164,6 +200,11 @@ type RecentItem struct {
 	Step      string   `json:"step,omitempty"`
 	ConfirmOf string   `json:"confirm_of,omitempty"`
 	AuthURL   string   `json:"auth_url,omitempty"`
+	Kind      string   `json:"kind,omitempty"`
+	Link      string   `json:"link,omitempty"`
+	Summary   string   `json:"summary,omitempty"`
+	Acked     bool     `json:"acked,omitempty"`
+	AckBy     string   `json:"ack_by,omitempty"`
 }
 
 // RecentList answers RecentRequest: decided records, newest first.
@@ -188,6 +229,7 @@ type VerdictAck struct {
 
 // PendingRecord is the authoritative stored request. Execution reads only
 // this — never anything that crossed a wire.
+// Kind is "" for exec petitions, "notify" for no-exec notify petitions.
 type PendingRecord struct {
 	Argv      []string          `json:"argv"`
 	UID       uint32            `json:"uid"`
@@ -200,6 +242,16 @@ type PendingRecord struct {
 	ConfirmOf string            `json:"confirm_of,omitempty"`
 	Preview   *PreviewRecord    `json:"preview,omitempty"`
 	AuthURL   string            `json:"auth_url,omitempty"`
+	Kind      string            `json:"kind,omitempty"`
+	Link      string            `json:"link,omitempty"`
+	Summary   string            `json:"summary,omitempty"`
+}
+
+// AckRecord is written once, atomically (O_EXCL): first ack wins.
+// Non-binding visibility signal; the agent verifies live state itself.
+type AckRecord struct {
+	By       string `json:"by"`
+	UnixNano int64  `json:"unix_nano"`
 }
 
 // VerdictRecord is written once, atomically (O_EXCL): one verdict wins.
@@ -211,7 +263,7 @@ type VerdictRecord struct {
 
 // AuditEvent is one JSON line in the append-only log.
 type AuditEvent struct {
-	Ev         string   `json:"ev"` // request | verdict | allow | exec | confirm | confirmation_timeout | client_aborted
+	Ev         string   `json:"ev"` // request | verdict | allow | exec | confirm | confirmation_timeout | client_aborted | notify | ack
 	UID        uint32   `json:"uid,omitempty"`
 	By         string   `json:"by,omitempty"`
 	Argv       []string `json:"argv,omitempty"`
@@ -226,4 +278,6 @@ type AuditEvent struct {
 	Exit       int      `json:"exit,omitempty"`
 	EnvDropped []string `json:"env_dropped,omitempty"`
 	TS         string   `json:"ts"`
+	Link       string   `json:"link,omitempty"`
+	Summary    string   `json:"summary,omitempty"`
 }
