@@ -5,11 +5,11 @@ import {
   SettingsCard,
   SettingsInput,
   SettingsSection,
-  SettingsSelect,
   SettingsSwitch,
 } from "@getpaseo/plugin/client/ui";
 import { initClientHelpers, registerHelperSettingsScreen } from "paseo-plugin-helper/client";
 import { approvalSettings } from "./shared/approval";
+import { NotificationTargetSelect } from "./client/notification-target-select";
 import {
   ApprovalHeaderIcon,
   ApprovalSurface,
@@ -53,7 +53,7 @@ export default function contribute(client: PluginClientContext) {
     id: "twofado",
     title: "2fado approval",
     icon: "ShieldCheck",
-    ui: { SettingsCard, SettingsSection, SettingsSwitch, SettingsSelect, SettingsInput },
+    ui: { SettingsCard, SettingsSection, SettingsSwitch, SettingsSelect: NotificationTargetSelect, SettingsInput },
     labels: {
       socketPath: "2fadod socket",
       notificationTarget: "Notification target",
@@ -64,7 +64,7 @@ export default function contribute(client: PluginClientContext) {
     descriptions: {
       socketPath: "Daemon-local path. The app sends it with every call; the server tries it first.",
       notificationTarget:
-        "Where new requests page: Telegram, Paseo, or Both (default). Telegram is a permanent parallel channel.",
+        "Where new requests page: Telegram, Paseo, or Both (default).",
       telegramBotToken: "Bot token from @BotFather (e.g. 123456:ABC-DEF...). Synced to daemon config.",
       telegramChatId: "Target Telegram chat or channel ID (e.g. -100123456789 or 12345678).",
       telegramApprovers: "Comma-separated Telegram usernames authorized to approve (e.g. @alice, @bob).",
