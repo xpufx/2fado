@@ -38,3 +38,7 @@ Before `state/3-verify` + `attention/2-user` ("real-use test this"):
 ## 5. Verify is non-binding
 
 `state/3-verify` never means "blocked on human forever." If operator doesn't test: close as superseded/done with rationale, requeue, or verify by proxy — and say so on the ticket. No mutual-wait deadlocks.
+
+## 6. Clickable issue refs
+
+Every issue reference in chat is a markdown link: `[#NN](https://forge.mrs.aager.de/<owner>/<repo>/issues/NN)`. Cross-repo refs use their own base. Never a bare number.
