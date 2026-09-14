@@ -262,6 +262,7 @@ func (s Service) RunWithPeerCancel(req protocol.RunRequest, uid uint32, peerPID 
 		Preview: preview,
 		Git:     snapshotGit(req.Cwd),
 		FD:      snapshotEntry(req.Argv, req.Cwd),
+		Seal:    s.snapshotSeal(rid, req.Argv, req.Cwd),
 	}, rid)
 	s.page(rid, req, uid)
 	if req.Detach {
@@ -355,6 +356,7 @@ func (s Service) confirm(rid1 string, req protocol.RunRequest, uid uint32, clean
 		Preview:   rec1.Preview,
 		Git:       snapshotGit(req.Cwd),
 		FD:        snapshotEntry(req.Argv, req.Cwd),
+		Seal:      s.snapshotSeal(rid, req.Argv, req.Cwd),
 		Suspend:   rec1.Suspend,
 	}, rid)
 	s.Store.Append(protocol.AuditEvent{
@@ -432,8 +434,29 @@ func (s Service) confirm(rid1 string, req protocol.RunRequest, uid uint32, clean
 
 func (s Service) runApproved(rid string, req protocol.RunRequest, uid uint32, clean map[string]string) protocol.RunResult {
 	var pin *protocol.FDPin
+	var seal *protocol.SealPin
 	if rec, err := s.Store.Load(rid); err == nil {
 		pin = rec.FD
+		seal = rec.Seal
+	}
+	if drift := s.checkSealDrift(rid); drift != nil && drift.Drift {
+		s.Store.Append(protocol.AuditEvent{Ev: "seal_drift", Argv: req.Argv,
+			RID: rid, Decision: "block", Summary: drift.Reason})
+		s.Store.SaveResult(rid, -1, "seal-drift: "+drift.Reason)
+		return protocol.RunResult{Status: "denied", Reason: "seal-drift: " + drift.Reason}
+	}
+	execArgv, execPin := req.Argv, pin
+	if seal != nil && len(seal.Files) > 0 && !s.Conf.DryRun {
+		dir, err := s.materializeSeal(rid)
+		if err != nil {
+			reason := "sealed artifact for approval is unusable"
+			s.Store.Append(protocol.AuditEvent{Ev: "seal_drift", Argv: req.Argv,
+				RID: rid, Decision: "block", Summary: reason})
+			s.Store.SaveResult(rid, -1, "seal-drift: "+reason)
+			return protocol.RunResult{Status: "denied", Reason: "seal-drift: " + reason}
+		}
+		execArgv = sealedArgv(req.Argv, req.Cwd, seal, dir)
+		execPin = snapshotEntry(execArgv, req.Cwd)
 	}
 	if drift := s.checkFDDrift(rid); drift != nil && drift.Drift {
 		s.Store.Append(protocol.AuditEvent{Ev: "fd_drift", Argv: req.Argv,
@@ -452,7 +475,7 @@ func (s Service) runApproved(rid string, req protocol.RunRequest, uid uint32, cl
 			s.Store.SaveResult(rid, -1, "git-drift: "+drift.Reason)
 			return protocol.RunResult{Status: "denied", Reason: "git-drift: " + drift.Reason}
 		}
-		code, out, asUID := s.runPinned(req.Argv, req.Cwd, clean, pin, func(authURL string) {
+		code, out, asUID := s.runPinned(execArgv, req.Cwd, clean, execPin, func(authURL string) {
 			s.Store.SetAuthURL(rid, authURL)
 			s.notifyAuthURL(rid, req, authURL)
 		})
@@ -462,7 +485,7 @@ func (s Service) runApproved(rid string, req protocol.RunRequest, uid uint32, cl
 		s.Store.SaveResult(rid, code, out)
 		return protocol.RunResult{Status: "allowed", Exit: code, Output: out}
 	}
-	code, out, asUID := s.runPinned(req.Argv, req.Cwd, clean, pin, func(authURL string) {
+	code, out, asUID := s.runPinned(execArgv, req.Cwd, clean, execPin, func(authURL string) {
 		s.Store.SetAuthURL(rid, authURL)
 		s.notifyAuthURL(rid, req, authURL)
 	})
@@ -572,6 +595,12 @@ func (s Service) List() protocol.PendingList {
 				items[i].FDDrift = drift
 			}
 		}
+		if rec.Seal != nil && len(rec.Seal.Files) > 0 {
+			items[i].Seal = rec.Seal
+			if drift := s.checkSealDrift(items[i].ID); drift != nil {
+				items[i].SealDrift = drift
+			}
+		}
 		if rec.Suspend != nil {
 			items[i].Suspend = rec.Suspend
 		}
@@ -596,6 +625,10 @@ func (s Service) Recent(limit int) protocol.RecentList {
 			items[i].FDDrift = &protocol.FDDrift{Drift: true, Block: true,
 				Reason: strings.TrimSpace(strings.TrimPrefix(items[i].Output, "fd-drift:"))}
 		}
+		if items[i].Exit == -1 && strings.HasPrefix(items[i].Output, "seal-drift:") {
+			items[i].SealDrift = &protocol.SealDrift{Drift: true, Block: true,
+				Reason: strings.TrimSpace(strings.TrimPrefix(items[i].Output, "seal-drift:"))}
+		}
 	}
 	return protocol.RecentList{Items: items}
 }
@@ -613,6 +646,10 @@ func (s Service) Status(id string) protocol.StatusResponse {
 		st.Status = "denied"
 		st.Decision = "fd-drift"
 	}
+	if st.Output != "" && strings.HasPrefix(st.Output, "seal-drift:") && st.Exit == -1 {
+		st.Status = "denied"
+		st.Decision = "seal-drift"
+	}
 	rec, err := s.Store.Load(id)
 	if err != nil {
 		return st
@@ -624,6 +661,12 @@ func (s Service) Status(id string) protocol.StatusResponse {
 		st.FD = rec.FD
 		if drift := s.checkFDDrift(id); drift != nil {
 			st.FDDrift = drift
+		}
+	}
+	if rec.Seal != nil && len(rec.Seal.Files) > 0 {
+		st.Seal = rec.Seal
+		if drift := s.checkSealDrift(id); drift != nil {
+			st.SealDrift = drift
 		}
 	}
 	if rec.Git == nil || !rec.Git.Present {
