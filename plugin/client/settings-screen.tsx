@@ -38,8 +38,9 @@ export function TwofadoSettingsScreen() {
         setDraft({ ...FALLBACK, ...res });
         setLoaded(true);
       })
-      .catch(() => {
+      .catch((err) => {
         if (!mounted.current) return;
+        console.warn("[2fado] Failed to load settings:", err);
         toast.error("Failed to load 2fado settings.");
       });
     return () => {
@@ -52,7 +53,8 @@ export function TwofadoSettingsScreen() {
     setDraft((prev) => ({ ...prev, ...p }));
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      update(p).catch(() => {
+      update(p).catch((err) => {
+        console.warn("[2fado] Failed to save settings:", err);
         toast.error("Failed to save 2fado settings.");
       });
     }, 300);
