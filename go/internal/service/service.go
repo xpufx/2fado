@@ -216,11 +216,26 @@ func flatten(env map[string]string) []string {
 
 // // Run handles one RunRequest end to end with optional cancellation.
 func (s Service) Run(req protocol.RunRequest, uid uint32) protocol.RunResult {
-	return s.RunWithCancel(req, uid, nil)
+	return s.RunWithPeer(req, uid, 0)
+}
+
+// RunWithPeer handles one RunRequest with the socket peer PID for the
+// suspended-execution barrier (0 skips the barrier, preserving plain
+// in-process callers and tests).
+func (s Service) RunWithPeer(req protocol.RunRequest, uid uint32, peerPID int) protocol.RunResult {
+	return s.RunWithPeerCancel(req, uid, peerPID, nil)
 }
 
 // RunWithCancel handles one RunRequest end to end with early cancellation support.
 func (s Service) RunWithCancel(req protocol.RunRequest, uid uint32, cancel <-chan struct{}) protocol.RunResult {
+	return s.RunWithPeerCancel(req, uid, 0, cancel)
+}
+
+// RunWithPeerCancel handles one RunRequest end to end with early
+// cancellation support and the suspended-execution barrier: the agent
+// process group (via peerPID) holds SIGSTOP while pending and resumes
+// with SIGCONT on verdict, timeout, or client abort.
+func (s Service) RunWithPeerCancel(req protocol.RunRequest, uid uint32, peerPID int, cancel <-chan struct{}) protocol.RunResult {
 	clean, dropped := s.ScrubEnv(req.Env)
 	tier := s.Policy.Tier(req.Argv)
 	s.Store.Append(protocol.AuditEvent{Ev: "request", UID: uid,
@@ -250,9 +265,11 @@ func (s Service) RunWithCancel(req protocol.RunRequest, uid uint32, cancel <-cha
 	}, rid)
 	s.page(rid, req, uid)
 	if req.Detach {
-		go s.runDetached(rid, req, uid, clean, expires)
+		go s.runDetached(rid, req, uid, clean, expires, peerPID)
 		return protocol.RunResult{Status: "pending", ID: rid}
 	}
+	pin := s.snapshotSuspend(rid, peerPID, uid)
+	defer s.resumeSuspend(rid, pin)
 	v := s.await(rid, expires, cancel)
 	decision := "timeout"
 	by := ""
@@ -287,8 +304,12 @@ func (s Service) needsConfirm(argv []string) bool {
 }
 
 // runDetached awaits the verdict in the background for fire-and-forget
-// requests, then executes or records the outcome in the store.
-func (s Service) runDetached(rid string, req protocol.RunRequest, uid uint32, clean map[string]string, expires time.Time) {
+// requests, then executes or records the outcome in the store. It owns
+// the suspended-execution barrier for its window: the parent returned
+// pending immediately, so the hold starts here, not in the caller.
+func (s Service) runDetached(rid string, req protocol.RunRequest, uid uint32, clean map[string]string, expires time.Time, peerPID int) {
+	pin := s.snapshotSuspend(rid, peerPID, uid)
+	defer s.resumeSuspend(rid, pin)
 	v := s.await(rid, expires, nil)
 	decision := "timeout"
 	by := ""
@@ -334,6 +355,7 @@ func (s Service) confirm(rid1 string, req protocol.RunRequest, uid uint32, clean
 		Preview:   rec1.Preview,
 		Git:       snapshotGit(req.Cwd),
 		FD:        snapshotEntry(req.Argv, req.Cwd),
+		Suspend:   rec1.Suspend,
 	}, rid)
 	s.Store.Append(protocol.AuditEvent{
 		Ev:        "confirm",
@@ -488,6 +510,7 @@ func (s Service) AdoptOrphans() {
 			req := protocol.RunRequest{Argv: rec.Argv, Cwd: rec.Cwd, Env: map[string]string{}}
 			s.closeCard(rid, req, rec.UID, "timeout", "system")
 			s.Store.SaveResult(rid, -1, "timeout")
+			s.resumeStored(rid)
 			continue
 		}
 		go s.adoptOne(rid, rec)
@@ -496,6 +519,7 @@ func (s Service) AdoptOrphans() {
 
 func (s Service) adoptOne(rid string, rec protocol.PendingRecord) {
 	req := protocol.RunRequest{Argv: rec.Argv, Cwd: rec.Cwd, Env: rec.Env}
+	defer s.resumeStored(rid)
 	v := s.await(rid, time.Unix(rec.Expires, 0), nil)
 	decision := "timeout"
 	by := "system"
@@ -548,6 +572,9 @@ func (s Service) List() protocol.PendingList {
 				items[i].FDDrift = drift
 			}
 		}
+		if rec.Suspend != nil {
+			items[i].Suspend = rec.Suspend
+		}
 	}
 	return protocol.PendingList{Items: items}
 }
@@ -589,6 +616,9 @@ func (s Service) Status(id string) protocol.StatusResponse {
 	rec, err := s.Store.Load(id)
 	if err != nil {
 		return st
+	}
+	if rec.Suspend != nil {
+		st.Suspend = rec.Suspend
 	}
 	if rec.FD != nil && rec.FD.Path != "" {
 		st.FD = rec.FD
