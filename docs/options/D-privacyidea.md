@@ -1,5 +1,9 @@
 # Option D — privacyIDEA push (minimal custom code, sudo stays)
 
+> Note (2026-09): pre-PoC research, superseded by the working Go PoC
+> (`docs/poc.md`, `docs/backend-cli.md`). Kept for history; not the
+> current plan.
+
 ## Tool research
 
 **privacyIDEA** (`privacyidea/privacyidea`, AGPL-3.0, alive — server,
