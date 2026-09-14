@@ -13,7 +13,7 @@ type ucred struct {
 	gid uint32
 }
 
-func soPeercred(fd uintptr) (uint32, error) {
+func soPeercred(fd uintptr) (int, uint32, error) {
 	var cred ucred
 	l := uint32(unsafe.Sizeof(cred))
 	_, _, errno := syscall.Syscall6(syscall.SYS_GETSOCKOPT,
@@ -23,7 +23,7 @@ func soPeercred(fd uintptr) (uint32, error) {
 		uintptr(unsafe.Pointer(&cred)),
 		uintptr(unsafe.Pointer(&l)), 0)
 	if errno != 0 {
-		return 0, errno
+		return 0, 0, errno
 	}
-	return cred.uid, nil
+	return int(cred.pid), cred.uid, nil
 }
