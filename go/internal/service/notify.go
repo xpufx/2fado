@@ -81,22 +81,22 @@ func (s Service) Ack(sub protocol.AckSubmit, callerUID uint32) protocol.AckRespo
 
 func (s Service) pageNotify(rid, link, summary string, uid uint32, ttl time.Duration) {
 	left := int64(ttl / time.Second)
-	if s.isPlaceholder() {
-		fmt.Printf("[pager:stdout] notify %s: %s\n%s\n(ack: 2fado ack %s)\n", rid, summary, link, rid)
+	if s.notifyTelegram() && !s.isPlaceholder() {
+		cid := s.activeChatID()
+		tg := s.activeTG()
+		text := telegram.NotifyCard(s.Host, link, summary, rid, left, false, "")
+		if mid, err := tg.SendWithMarkup(cid, text, 0, telegram.NotifyButtons(link, rid)); err == nil {
+			s.Store.AttachPager(rid, cid, mid)
+			return
+		}
+		fmt.Printf("[pager:stdout] notify %s: %s\n%s\n", rid, summary, link)
 		return
 	}
-	cid := s.activeChatID()
-	tg := s.activeTG()
-	text := telegram.NotifyCard(s.Host, link, summary, rid, left, false, "")
-	if mid, err := tg.SendWithMarkup(cid, text, 0, telegram.NotifyButtons(link, rid)); err == nil {
-		s.Store.AttachPager(rid, cid, mid)
-	} else {
-		fmt.Printf("[pager:stdout] notify %s: %s\n%s\n", rid, summary, link)
-	}
+	fmt.Printf("[pager:stdout] notify %s: %s\n%s\n(ack: 2fado ack %s)\n", rid, summary, link, rid)
 }
 
 func (s Service) closeNotifyCard(rid, by string) {
-	if s.isPlaceholder() {
+	if !s.notifyTelegram() || s.isPlaceholder() {
 		return
 	}
 	rec, err := s.Store.Load(rid)
