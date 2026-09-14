@@ -237,7 +237,7 @@ export function ApprovalHeaderIcon(props: PluginButtonIconProps) {
     <PluginThemeProvider theme={{ colors: theme.colors }}>
       <Animated.View style={{ width: size, height: size, alignItems: "center", justifyContent: "center", opacity: pulse }}>
         <Icon
-          name={down ? "ShieldAlert" : "ShieldCheck"}
+          name="ShieldCheck"
           size={size}
           color={activeColor}
         />
