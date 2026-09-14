@@ -233,6 +233,36 @@ func AuthButtons(authURL string) string {
 	return string(kb)
 }
 
+// maxNotifySummaryRunes bounds the notify summary on cards.
+const maxNotifySummaryRunes = 1000
+
+// NotifyCard renders a no-exec notify petition: link + summary with ack
+// state. All untrusted fields are html-escaped.
+func NotifyCard(host, link, summary, rid string, expiresIn int64, acked bool, ackBy string) string {
+	sum := summary
+	if r := []rune(sum); len(r) > maxNotifySummaryRunes {
+		sum = string(r[:maxNotifySummaryRunes]) + "…[truncated]"
+	}
+	head := "📣 <b>Action needed</b>"
+	if acked {
+		head = fmt.Sprintf("✅ <b>Acknowledged via %s</b>", html.EscapeString(sourceLabel(ackBy)))
+	}
+	return fmt.Sprintf("%s\n🖥️ host: <code>%s</code>\n🔗 link: %s\n📝 summary:\n<pre><code>%s</code></pre>\n🕒 expires in %ds · notify <code>%s</code>",
+		head, html.EscapeString(host), html.EscapeString(link), html.EscapeString(sum), expiresIn, html.EscapeString(rid))
+}
+
+// NotifyButtons builds the inline keyboard for a notify card: an Ack
+// callback button plus a URL button opening the link.
+func NotifyButtons(link, rid string) string {
+	kb, _ := json.Marshal(struct {
+		Inline [][]map[string]string `json:"inline_keyboard"`
+	}{Inline: [][]map[string]string{
+		{{"text": "✅ Ack", "callback_data": "ack:" + rid}},
+		{{"text": "🔗 Open link", "url": link}},
+	}})
+	return string(kb)
+}
+
 // Send posts the card, returns the message id for later rewriting.
 func (c Client) Send(chatID, text, rid string) (int64, error) {
 	return c.SendWithMarkup(chatID, text, 0, keyboard(rid))
@@ -352,6 +382,8 @@ func (c Client) Poll(ctx context.Context, offset int64, approvers map[string]boo
 			}
 			if kind == "approve" {
 				c.answer(u.Callback.ID, "approved — executing")
+			} else if kind == "ack" {
+				c.answer(u.Callback.ID, "acknowledged")
 			} else {
 				c.answer(u.Callback.ID, "denied")
 			}
@@ -366,6 +398,9 @@ func splitVerdict(data string) (kind, rid string, ok bool) {
 	}
 	if strings.HasPrefix(data, "deny:") {
 		return "deny", strings.TrimPrefix(data, "deny:"), true
+	}
+	if strings.HasPrefix(data, "ack:") {
+		return "ack", strings.TrimPrefix(data, "ack:"), true
 	}
 	return "", "", false
 }
