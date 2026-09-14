@@ -1,5 +1,9 @@
 # 2fado — general spec (v0, everything pivotable)
 
+> Note (2026-09): pre-PoC research, superseded by the working Go PoC
+> (`docs/poc.md`, `docs/backend-cli.md`). Kept for history; not the
+> current plan.
+
 Personal-use project. Preference ladder: single tool that does it all >
 compose existing tools > small glue script > build it ourselves (last resort).
 
