@@ -100,11 +100,50 @@ func (s Store) Consume(rid, decision, by string) bool {
 	return err == nil
 }
 
+// Ack writes a non-binding acknowledgement exactly once (O_EXCL): first
+// ack wins. Only valid on existing notify-kind records; exec petitions
+// and unknown IDs are rejected.
+func (s Store) Ack(rid, by string) bool {
+	rec, err := s.Load(rid)
+	if err != nil || rec.Kind != "notify" {
+		return false
+	}
+	data, err := json.Marshal(protocol.AckRecord{
+		By:       by,
+		UnixNano: time.Now().UnixNano(),
+	})
+	if err != nil {
+		return false
+	}
+	f, err := os.OpenFile(filepath.Join(s.Pending, rid+".ack"),
+		os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	_, err = f.Write(data)
+	return err == nil
+}
+
+// AckInfo returns the acknowledgement for a notify petition, if any.
+func (s Store) AckInfo(rid string) *protocol.AckRecord {
+	data, err := os.ReadFile(filepath.Join(s.Pending, rid+".ack"))
+	if err != nil {
+		return nil
+	}
+	var a protocol.AckRecord
+	if err := json.Unmarshal(data, &a); err != nil {
+		return nil
+	}
+	return &a
+}
+
 // DefaultPruneTTL is the retention window for decided or expired records.
 const DefaultPruneTTL = 24 * time.Hour
 
-// Prune deletes decided (.verdict) or expired records older than the TTL,
-// keeping live undecided, unexpired petitions. Returns the purge count.
+// Prune deletes decided (.verdict), acked (.ack), or expired records older
+// than the TTL, keeping live undecided, unacked, unexpired petitions.
+// Returns the purge count.
 func (s Store) Prune(olderThan time.Duration) (int, error) {
 	entries, err := os.ReadDir(s.Pending)
 	if err != nil {
@@ -119,7 +158,7 @@ func (s Store) Prune(olderThan time.Duration) (int, error) {
 		switch {
 		case strings.HasSuffix(name, ".json"):
 			rid = strings.TrimSuffix(name, ".json")
-		case strings.HasSuffix(name, ".verdict"), strings.HasSuffix(name, ".result"):
+		case strings.HasSuffix(name, ".verdict"), strings.HasSuffix(name, ".result"), strings.HasSuffix(name, ".ack"):
 			dot := strings.LastIndex(name, ".")
 			rid = name[:dot]
 		default:
@@ -130,11 +169,11 @@ func (s Store) Prune(olderThan time.Duration) (int, error) {
 		}
 		seen[rid] = true
 		rec, err := s.Load(rid)
-		if err == nil && s.Verdict(rid) == nil && rec.Expires > now.Unix() {
+		if err == nil && s.Verdict(rid) == nil && s.AckInfo(rid) == nil && rec.Expires > now.Unix() {
 			continue
 		}
 		oldest := now
-		for _, suf := range []string{".json", ".verdict", ".result"} {
+		for _, suf := range []string{".json", ".verdict", ".result", ".ack"} {
 			if fi, err := os.Stat(filepath.Join(s.Pending, rid+suf)); err == nil {
 				if fi.ModTime().Before(oldest) {
 					oldest = fi.ModTime()
@@ -154,6 +193,7 @@ func (s Store) Purge(rid string) error {
 	_ = os.Remove(s.pendingPath(rid))
 	_ = os.Remove(filepath.Join(s.Pending, rid+".verdict"))
 	_ = os.Remove(filepath.Join(s.Pending, rid+".result"))
+	_ = os.Remove(filepath.Join(s.Pending, rid+".ack"))
 	return nil
 }
 
@@ -180,7 +220,9 @@ func (s Store) FindConfirmation(parentRID string) (string, *protocol.PendingReco
 	return "", nil
 }
 
-// List returns unexpired, undecided records, newest last.
+// List returns unexpired, undecided, unacked records, newest last.
+// Acked notify petitions clear early: they leave the pending queue but
+// remain queryable via Status and Recent.
 func (s Store) List(now int64) []protocol.PendingItem {
 	entries, err := os.ReadDir(s.Pending)
 	if err != nil {
@@ -194,6 +236,9 @@ func (s Store) List(now int64) []protocol.PendingItem {
 		}
 		rid := strings.TrimSuffix(name, ".json")
 		if s.Verdict(rid) != nil {
+			continue
+		}
+		if s.AckInfo(rid) != nil {
 			continue
 		}
 		rec, err := s.Load(rid)
@@ -214,6 +259,9 @@ func (s Store) List(now int64) []protocol.PendingItem {
 			ConfirmOf: rec.ConfirmOf,
 			Preview:   rec.Preview,
 			AuthURL:   rec.AuthURL,
+			Kind:      rec.Kind,
+			Link:      rec.Link,
+			Summary:   rec.Summary,
 		})
 	}
 	return out
@@ -256,7 +304,7 @@ func (s Store) loadResult(rid string) (int, string) {
 	return r.Exit, r.Output
 }
 
-// Recent returns decided records, newest first, capped at limit.
+// Recent returns decided or acked records, newest first, capped at limit.
 func (s Store) Recent(limit int) []protocol.RecentItem {
 	if limit <= 0 || limit > 50 {
 		limit = 10
@@ -272,12 +320,23 @@ func (s Store) Recent(limit int) []protocol.RecentItem {
 	var found []decided
 	for _, e := range entries {
 		name := e.Name()
-		if !strings.HasSuffix(name, ".verdict") {
+		if !strings.HasSuffix(name, ".verdict") && !strings.HasSuffix(name, ".ack") {
 			continue
 		}
-		rid := strings.TrimSuffix(name, ".verdict")
+		dot := strings.LastIndex(name, ".")
+		rid := name[:dot]
 		info, err := e.Info()
 		if err != nil {
+			continue
+		}
+		dup := false
+		for _, f := range found {
+			if f.rid == rid {
+				dup = true
+				break
+			}
+		}
+		if dup {
 			continue
 		}
 		found = append(found, decided{rid: rid, mod: info.ModTime()})
@@ -290,6 +349,22 @@ func (s Store) Recent(limit int) []protocol.RecentItem {
 	for _, f := range found {
 		rec, err := s.Load(f.rid)
 		if err != nil {
+			continue
+		}
+		if ack := s.AckInfo(f.rid); ack != nil {
+			out = append(out, protocol.RecentItem{
+				ID:       f.rid,
+				Argv:     rec.Argv,
+				Cwd:      rec.Cwd,
+				Decision: "ack",
+				By:       ack.By,
+				Exit:     -1,
+				Kind:     rec.Kind,
+				Link:     rec.Link,
+				Summary:  rec.Summary,
+				Acked:    true,
+				AckBy:    ack.By,
+			})
 			continue
 		}
 		v := s.Verdict(f.rid)
@@ -324,6 +399,9 @@ func (s Store) Recent(limit int) []protocol.RecentItem {
 			Step:      step,
 			ConfirmOf: rec.ConfirmOf,
 			AuthURL:   rec.AuthURL,
+			Kind:      rec.Kind,
+			Link:      rec.Link,
+			Summary:   rec.Summary,
 		})
 	}
 	if out == nil {
@@ -341,6 +419,52 @@ func (s Store) Status(rid string, now int64) protocol.StatusResponse {
 	step := rec.Step
 	if step == "" {
 		step = "initial"
+	}
+	if rec.Kind == "notify" {
+		if ack := s.AckInfo(rid); ack != nil {
+			return protocol.StatusResponse{
+				ID:        rid,
+				Status:    "acked",
+				Decision:  "ack",
+				By:        ack.By,
+				Cwd:       rec.Cwd,
+				UID:       rec.UID,
+				ExpiresIn: 0,
+				Exit:      -1,
+				Step:      step,
+				Kind:      rec.Kind,
+				Link:      rec.Link,
+				Summary:   rec.Summary,
+				Acked:     true,
+				AckBy:     ack.By,
+				AckAt:     ack.UnixNano,
+			}
+		}
+		if rec.Expires > now {
+			return protocol.StatusResponse{
+				ID:        rid,
+				Status:    "pending",
+				Cwd:       rec.Cwd,
+				UID:       rec.UID,
+				ExpiresIn: rec.Expires - now,
+				Exit:      -1,
+				Step:      step,
+				Kind:      rec.Kind,
+				Link:      rec.Link,
+				Summary:   rec.Summary,
+			}
+		}
+		return protocol.StatusResponse{
+			ID:      rid,
+			Status:  "timeout",
+			Cwd:     rec.Cwd,
+			UID:     rec.UID,
+			Exit:    -1,
+			Step:    step,
+			Kind:    rec.Kind,
+			Link:    rec.Link,
+			Summary: rec.Summary,
+		}
 	}
 	v := s.Verdict(rid)
 	if v == nil {
