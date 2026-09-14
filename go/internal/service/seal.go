@@ -31,7 +31,6 @@ const (
 	maxSealFiles    = 32
 	maxSealTotal    = 8 << 20
 	maxSealFileSize = 2 << 20
-	sealEntryPrefix = "__entrypoint__/"
 )
 
 // sealStateDir resolves the on-disk home for sealed artifacts.
@@ -56,11 +55,12 @@ type sealTarget struct {
 	rel string
 }
 
-// sealCandidates collects mutable inputs for argv in cwd: the
-// entrypoint (even absolute, even outside cwd) plus any other token
-// resolving to a regular file inside cwd. Flags, stdio-looking tokens,
-// and missing paths are skipped. Results are deduped, Rel-sorted, and
-// capped so petitions stay cheap.
+// sealCandidates collects mutable workspace inputs for argv in cwd:
+// tokens resolving to regular files inside cwd (the entrypoint script,
+// relative file arguments, or absolute paths under cwd). Flags,
+// stdio-looking tokens, missing paths, and files outside cwd are
+// skipped: the entrypoint binary outside cwd is the fd pin's job (#36).
+// Results are deduped, Rel-sorted, and capped so petitions stay cheap.
 func sealCandidates(argv []string, cwd string) []sealTarget {
 	if len(argv) == 0 || strings.TrimSpace(cwd) == "" {
 		return nil
@@ -71,14 +71,7 @@ func sealCandidates(argv []string, cwd string) []sealTarget {
 	}
 	seen := map[string]bool{}
 	var out []sealTarget
-	add := func(abs, rel string) {
-		if abs == "" || rel == "" || seen[abs] {
-			return
-		}
-		seen[abs] = true
-		out = append(out, sealTarget{abs: abs, rel: rel})
-	}
-	for i, tok := range argv {
+	for _, tok := range argv {
 		if strings.TrimSpace(tok) == "" || strings.HasPrefix(tok, "-") {
 			continue
 		}
@@ -99,13 +92,16 @@ func sealCandidates(argv []string, cwd string) []sealTarget {
 		if err != nil || st.IsDir() || !st.Mode().IsRegular() {
 			continue
 		}
-		if rel, err := filepath.Rel(cwd, abs); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			add(abs, filepath.ToSlash(rel))
+		rel, err := filepath.Rel(cwd, abs)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			continue
 		}
-		if i == 0 {
-			add(abs, sealEntryPrefix+filepath.Base(abs))
+		rel = filepath.ToSlash(rel)
+		if seen[abs] {
+			continue
 		}
+		seen[abs] = true
+		out = append(out, sealTarget{abs: abs, rel: rel})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].rel < out[j].rel })
 	if len(out) > maxSealFiles {
