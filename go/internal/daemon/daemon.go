@@ -125,6 +125,12 @@ func handle(svc *service.Service, c net.Conn) {
 	case msg.Verdict != nil:
 		ack := svc.Submit(*msg.Verdict, uid)
 		out, _ = json.Marshal(ack)
+	case msg.Notify != nil:
+		res := svc.Notify(*msg.Notify, peerUID(c))
+		out, _ = json.Marshal(res)
+	case msg.Ack != nil:
+		ack := svc.Ack(*msg.Ack, uid)
+		out, _ = json.Marshal(ack)
 	case msg.Run != nil:
 		disconnect := make(chan struct{})
 		var once sync.Once
