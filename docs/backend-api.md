@@ -1,6 +1,6 @@
 # Backend API — plugin RPC reference (`approval.*`)
 
-Status: draft. Source: design report on [Issue #28](https://forge.mrs.aager.de/oktay/2fado/issues/28) (contract inventory §1). Code refs: `plugin/shared/approval.ts` (zod contracts), `plugin/server/fado.ts` (handlers), `plugin/client/approvals.tsx` (polling).
+Status: draft. Source: design report on [Issue #28](https://forge.mrs.aager.de/oktay/2fado/issues/28) (contract inventory §1). Code refs: `plugin/shared/approval.ts` (zod contracts), `plugin/server/twofado.ts` (handlers), `plugin/client/approvals.tsx` (polling).
 
 All contracts use helper `defineContract`; both sides validated. Every input carries optional `socketPath` (future `backendRef` alias — see `docs/backend-adapter.md`).
 
