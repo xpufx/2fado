@@ -1,8 +1,8 @@
-# Backend API — plugin RPC reference (`approval.*`)
+# Backend API — third-party consumer RPC reference (`approval.*`)
 
-Status: draft. Source: design report on Issue #28 (Forgejo) (contract inventory §1). Code refs: `plugin/shared/approval.ts` (zod contracts), `plugin/server/twofado.ts` (handlers), `plugin/client/approvals.tsx` (polling).
+Status: draft. Source: design report on Issue #28 (Forgejo) (contract inventory §1). This describes the contract a third-party consumer implements against the daemon socket API; op inventory source of truth is `go/internal/protocol/protocol.go` (`ClientMessage`, 11 ops).
 
-All contracts use helper `defineContract`; both sides validated. Every input carries optional `socketPath` (future `backendRef` alias — see `docs/backend-adapter.md`).
+All consumer RPCs are validated on both sides. Every input carries optional `socketPath` (future `backendRef` alias — see `docs/backend-adapter.md`).
 
 ## `approval.list` — pending queue
 

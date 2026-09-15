@@ -1,8 +1,10 @@
 # 2fado Paseo plugin — spec v1 (second approval transport)
 
-Status: implemented (see `plugin/` — client, server, shared contracts).
-This doc is the original v1 spec, kept for history; scope notes below may
-lag the code (`docs/backend-api.md` is the current contract reference).
+Status: historical v1 spec. The plugin is now a third-party API consumer
+(lives outside this repo); this repo owns the daemon + socket API contract.
+`docs/backend-adapter.md` is the current contract reference, and
+`go/internal/protocol/protocol.go` (`ClientMessage`, 11 ops) is the source
+of truth for the op inventory.
 Upstream facts (via Master, confirmed): pill
 bodies + attached modal/popover are **human-only** (no agent read or
 interaction path; buttons call plugin RPCs agents can't reach).
@@ -28,11 +30,11 @@ Approve/deny pending 2fado requests from inside Paseo. Same verdict
   and verdicts must never ride in timeline data.
 - Workspace panel deferred (status dashboard is a nice-to-have, not v1).
 
-## RPC contracts (helper `defineContract`, both sides validated)
+## RPC contracts (historical: what the third-party consumer implements)
 
 ```ts
-// shared/approval.ts — defineContract from paseo-plugin-helper/shared
-pendingList = defineContract({
+// historical shape (third-party consumer's approval.list / approval.verdict)
+pendingList = contract({
   name: "approval.list",
   input: z.object({ socketPath: z.string().min(1).optional() }),
   output: z.object({ items: z.array(z.object({
@@ -40,7 +42,7 @@ pendingList = defineContract({
     caller: z.string(), cwd: z.string(), expiresIn: z.number(),
   })) }),
 });
-verdict = defineContract({
+verdict = contract({
   name: "approval.verdict",
   input: z.object({ id: z.string(),
     decision: z.enum(["approve", "deny"]),
@@ -56,11 +58,10 @@ verdict = defineContract({
 
 - Owns the socket to `2fadod` (per-call `socketPath` from the app,
   then `TWOFADO_SOCKET` env, then `FADO_SOCKET` env, then
-  `/tmp/2fado.sock` — see `socketCandidates()` in
-  `plugin/server/twofado.ts`; the `/run/2fado.sock` candidate mentioned
-  in earlier drafts of this doc is not in the code). Polls `list` and fans out: toast per new id.
-  Socket calls are wrapped in `guardRpcHandler` (5s timeout, max 4
-  inflight, fail-fast) with structured `createPluginLogger` logging.
+  `/tmp/2fado.sock` — frozen contract; there is no `/run/2fado.sock`
+  candidate). Polls `list` and fans out: toast per new id.
+   Socket calls are guarded (5s timeout, max 4
+   inflight, fail-fast) with structured logging.
 - Verdict handler submits `{id, decision, by: "paseo"}` over the `2fadod`
   socket and returns `{recorded}`. No per-call allowlist: v0.8 exposes no
   clicker identity on either runtime, so a names list would be theater —

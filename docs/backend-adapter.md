@@ -1,16 +1,15 @@
 # Backend adapter — third-party contract
 
-Status: draft. Source: design report on Issue #28 (Forgejo) (contract inventory §1, adapter boundary §2). Code refs: `plugin/server/twofado.ts`, `plugin/shared/approval.ts`, `plugin/client/approvals.tsx`, `go/internal/protocol/protocol.go`.
+Status: draft. Source: design report on Issue #28 (Forgejo) (contract inventory §1, adapter boundary §2). Source of truth for the op inventory: `go/internal/protocol/protocol.go` (`ClientMessage`, 11 ops: run, verdict, notify, ack, list, recent, status, telegram_info, telegram_set_config, policy_add_rule, version).
 
 This page defines what a third-party backend implements so the 2fado plugin can consume it without `2fadod`.
 
 ## Transport (today)
 
-- Unix socket, JSON-lines: one JSON object + `\n` per request, one JSON line back, fresh connection per call (`twofado.ts:callDaemonOn`).
-- Socket timeout 2000ms per candidate (`telegram_info` uses 8000ms); every RPC wrapped in `guardRpcHandler({timeoutMs:5000, maxInflight:4})`.
-- Socket candidate order (`socketCandidates()`): per-call `input.socketPath` → `$TWOFADO_SOCKET` → `$FADO_SOCKET` → `/tmp/2fado.sock`.
-- Known drift: `docs/paseo-plugin.md` mentions `/run/2fado.sock` in the chain; code does not include it. Fix when freezing the contract.
-- Envelope (`protocol.ClientMessage`): exactly one field set. Plugin uses 8 of 12 ops; `run`, `notify`, `version` (+ `run detach`) are CLI-only today (see `docs/backend-cli.md`).
+- Unix socket, JSON-lines: one JSON object + `\n` per request, one JSON line back, fresh connection per call.
+- Socket timeout 2000ms per candidate (`telegram_info` uses 8000ms); every RPC wrapped in a 5s-timeout, max-4-inflight guard.
+- Frozen socket candidate order: per-call `socketPath` → `$TWOFADO_SOCKET` → `$FADO_SOCKET` → `/tmp/2fado.sock`. There is no `/run/2fado.sock` candidate.
+- Envelope (`protocol.ClientMessage`): exactly one field set. Third-party consumers use 8 of 11 ops; `run`, `notify`, `version` (+ `run detach`) are CLI-only today (see `docs/backend-cli.md`).
 
 ## Op table (plugin → backend)
 
@@ -25,7 +24,7 @@ This page defines what a third-party backend implements so the 2fado plugin can 
 | `{telegram_set_config:{bot_token,chat_id,approvers}}` | `TelegramSetConfigRequest{bot_token?,chat_id?,approvers?}` | `TelegramSetConfigResponse{success,bot_username,error}` |
 | `{policy_add_rule:{target,match_type,pattern}}` | `PolicyAddRuleRequest{target:whitelist\|blacklist,match_type:exact\|base\|custom,pattern[]}` | `PolicyAddRuleResponse{success,error,rules_count}` |
 
-Plugin-side mapping notes (`twofado.ts`): `PendingItem` is camelCased plus `host=os.hostname()`, `caller=String(uid)`, `step` normalized to `"confirm"|"initial"`; `status` whitelisted to `not_found|pending|confirming|running|completed|denied|timeout|client_aborted|confirmation_timeout|acked`, else `not_found`; telegram falls back to `configured?connected:unconfigured`.
+Consumer-side mapping notes (third-party consumer implements this): `PendingItem` is camelCased plus `host=os.hostname()`, `caller=String(uid)`, `step` normalized to `"confirm"|"initial"`; `status` whitelisted to `not_found|pending|confirming|running|completed|denied|timeout|client_aborted|confirmation_timeout|acked`, else `not_found`; telegram falls back to `configured?connected:unconfigured`.
 
 ## PendingItem: core vs optional
 
