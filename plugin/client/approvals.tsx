@@ -11,6 +11,7 @@ import {
   Card,
   CodeBlock,
   Collapsible,
+  CommandBox,
   EmptyState,
   KeyValue,
   KeyValueGroup,
@@ -24,7 +25,7 @@ import {
 } from "paseo-plugin-helper/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { Platform, Text, View, Animated, Easing } from "react-native";
+import { Text, View, Animated, Easing } from "react-native";
 import { ErrorBoundary } from "./error-boundary";
 import {
   approvalAck,
@@ -259,70 +260,6 @@ export function ApprovalHeaderIcon(props: PluginButtonIconProps) {
   );
 }
 
-function commandLine(argv: string[]): string {
-  return argv.map((arg) => (arg.includes(" ") ? JSON.stringify(arg) : arg)).join(" ");
-}
-
-function CommandBox({ argv }: { argv: string[] }) {
-  const { colors } = usePluginTheme();
-  const toast = useToast();
-  const [copied, setCopied] = useState(false);
-  const code = commandLine(argv);
-  const [prog, ...rest] = argv;
-
-  const handleCopy = async () => {
-    const ok = await copyToClipboard(code, { toast, toastMessage: "Command" });
-    if (ok) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
-  const fontFamily = Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" });
-
-  return (
-    <View
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-        backgroundColor: colors.surface2,
-        borderColor: colors.border,
-        borderWidth: 1,
-        borderRadius: 6,
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        gap: 8,
-      }}
-    >
-      <View style={{ flexDirection: "row", alignItems: "center", flex: 1, overflow: "hidden", gap: 6 }}>
-        <Text style={{ color: colors.statusWarning, fontWeight: "700", fontFamily, fontSize: 12 }}>
-          $
-        </Text>
-        <Text
-          selectable
-          numberOfLines={2}
-          style={{ color: colors.foreground, fontFamily, fontSize: 12, flex: 1 }}
-        >
-          <Text style={{ fontWeight: "700", color: colors.foreground }}>{prog ?? ""}</Text>
-          {rest.length > 0 ? (
-            <Text style={{ color: colors.foregroundMuted }}>
-              {" " + rest.map((a) => (a.includes(" ") ? JSON.stringify(a) : a)).join(" ")}
-            </Text>
-          ) : null}
-        </Text>
-      </View>
-      <Button
-        variant="ghost"
-        size="sm"
-        icon={copied ? "Check" : "Copy"}
-        accessibilityLabel="Copy command"
-        onPress={handleCopy}
-      />
-    </View>
-  );
-}
-
 function SectionHeader({ title, count }: { title: string; count?: number }) {
   const { colors } = usePluginTheme();
   return (
@@ -377,11 +314,11 @@ function ApprovalItem({
   onDecide(item: { id: string; argv: string[]; cwd: string }, decision: "approve" | "deny"): void;
   onAlways(item: { id: string; argv: string[]; cwd: string; preview?: { resolvedBinary?: string } }, target: "whitelist" | "blacklist"): void;
 }) {
-  const { colors } = usePluginTheme();
+  const { colors, fonts } = usePluginTheme();
   const [program] = item.argv;
   const isConfirm = item.step === "confirm";
   const urgent = item.expiresIn <= EXPIRY_URGENT_S;
-  const fontFamily = Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" });
+  const fontFamily = fonts.mono;
   const isDeciding = Boolean(deciding);
 
   return (
@@ -633,11 +570,11 @@ function NotifyItem({
   acking?: boolean;
   onAck(item: { id: string }): void;
 }) {
-  const { colors } = usePluginTheme();
+  const { colors, fonts } = usePluginTheme();
   const toast = useToast();
   const [copied, setCopied] = useState(false);
   const urgent = item.expiresIn <= EXPIRY_URGENT_S;
-  const fontFamily = Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" });
+  const fontFamily = fonts.mono;
 
   const handleCopyLink = async () => {
     if (!item.link) return;
@@ -767,7 +704,7 @@ function ExecutingItem({  item,
     output?: string;
   };
 }) {
-  const { colors } = usePluginTheme();
+  const { colors, fonts } = usePluginTheme();
   const [program] = item.argv ?? ["(command)"];
   const isConfirming = item.status === "confirming";
   const isCompleted = item.status === "completed";
@@ -780,7 +717,7 @@ function ExecutingItem({  item,
       ? colors.statusWarning
       : colors.accent;
 
-  const fontFamily = Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" });
+  const fontFamily = fonts.mono;
 
   return (
     <Card
@@ -877,7 +814,7 @@ function RecentItem({
     summary?: string;
   };
 }) {
-  const { colors } = usePluginTheme();
+  const { colors, fonts } = usePluginTheme();
   const isNotify = item.kind === "notify";
   const acked = item.decision === "ack";
   const approved = item.decision === "approve" || acked;
@@ -895,7 +832,7 @@ function RecentItem({
       ? colors.statusWarning
       : colors.statusSuccess;
 
-  const fontFamily = Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" });
+  const fontFamily = fonts.mono;
 
   return (
     <Card
