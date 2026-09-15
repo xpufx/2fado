@@ -12,3 +12,18 @@ daemon.log
 # Local-only tooling state.
 .serena/
 opencode.jsonc
+
+# Binary / build / test artifacts.
+*.tgz
+*.tar.gz
+node_modules/
+coverage.out
+*.test
+*.out
+*.exe
+*.log
+
+# Local secrets. Never commit.
+.env*
+*.pem
+*.key

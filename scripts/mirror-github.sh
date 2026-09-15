@@ -72,7 +72,7 @@ if [ ! -x "$SCANNER" ]; then
 	echo "[mirror-github] design). Point PII_SCANNER at it or abort. Refusing to push." >&2
 	exit 1
 fi
-"$SCANNER" --tree HEAD --allowlist LICENSE || {
+"$SCANNER" --tree HEAD || {
 	echo "[mirror-github] PII preflight FAILED — refusing to push." >&2
 	exit 1
 }
