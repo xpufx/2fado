@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"time"
 
 	"2fado/internal/client"
@@ -28,7 +29,7 @@ var (
 )
 
 func usage() int {
-	fmt.Println("usage: 2fado daemon | 2fado run -- <argv...> | 2fado approve|deny <id> | 2fado notify --link <url> --summary <text> [--ttl <dur>] | 2fado ack <id> | 2fado status <id> | 2fado version")
+	fmt.Println("usage: 2fado daemon | 2fado run -- <argv...> | 2fado approve|deny <id> | 2fado notify --link <url> --summary <text> [--ttl <dur>] | 2fado ack <id> | 2fado status <id> | 2fado list | 2fado recent [--limit N] | 2fado version")
 	return 2
 }
 
@@ -152,6 +153,27 @@ func main() {
 			os.Exit(usage())
 		}
 		os.Exit(client.Status(sock, os.Args[2]))
+	case "list":
+		if len(os.Args) != 2 {
+			os.Exit(usage())
+		}
+		os.Exit(client.List(sock))
+	case "recent":
+		limit := 0
+		args := os.Args[2:]
+		for i := 0; i < len(args); i++ {
+			if args[i] != "--limit" || i+1 >= len(args) {
+				os.Exit(usage())
+			}
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil || n < 0 {
+				fmt.Fprintln(os.Stderr, "2fado: bad --limit (want non-negative int)")
+				os.Exit(2)
+			}
+			limit = n
+			i++
+		}
+		os.Exit(client.Recent(sock, limit))
 	case "version", "-v", "--version":
 		os.Exit(printVersion())
 	case "socket-version":

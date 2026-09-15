@@ -166,6 +166,56 @@ func Status(sock, id string) int {
 	return 0
 }
 
+// List prints pending records (id, argv, cwd, step/confirm_of, kind, expires_in).
+func List(sock string) int {
+	raw, err := call(sock, protocol.ClientMessage{
+		List: &protocol.ListRequest{},
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "2fado: "+err.Error())
+		return 1
+	}
+	var res protocol.PendingList
+	if err := json.Unmarshal(raw, &res); err != nil {
+		fmt.Fprintln(os.Stderr, "2fado: bad reply")
+		return 1
+	}
+	if len(res.Items) == 0 {
+		fmt.Println("2fado: no pending requests")
+		return 0
+	}
+	for _, it := range res.Items {
+		fmt.Printf("id: %s\n  argv: %v\n  cwd: %s\n  step: %s\n  confirm_of: %s\n  kind: %s\n  expires_in: %ds\n",
+			it.ID, it.Argv, it.Cwd, it.Step, it.ConfirmOf, it.Kind, it.ExpiresIn)
+	}
+	return 0
+}
+
+// Recent prints decided records (id, argv, decision, by, exit, step/confirm_of).
+func Recent(sock string, limit int) int {
+	raw, err := call(sock, protocol.ClientMessage{
+		Recent: &protocol.RecentRequest{Limit: limit},
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "2fado: "+err.Error())
+		return 1
+	}
+	var res protocol.RecentList
+	if err := json.Unmarshal(raw, &res); err != nil {
+		fmt.Fprintln(os.Stderr, "2fado: bad reply")
+		return 1
+	}
+	if len(res.Items) == 0 {
+		fmt.Println("2fado: no recent records")
+		return 0
+	}
+	for _, it := range res.Items {
+		fmt.Printf("id: %s\n  argv: %v\n  decision: %s\n  by: %s\n  exit: %d\n  step: %s\n  confirm_of: %s\n",
+			it.ID, it.Argv, it.Decision, it.By, it.Exit, it.Step, it.ConfirmOf)
+	}
+	return 0
+}
+
 // SocketVersion queries the daemon for its build version over the socket.
 func SocketVersion(sock string) int {
 	raw, err := call(sock, protocol.ClientMessage{
