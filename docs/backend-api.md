@@ -1,6 +1,6 @@
 # Backend API — third-party consumer RPC reference (`approval.*`)
 
-Status: draft. Source: design report on Issue #28 (Forgejo) (contract inventory §1). This describes the contract a third-party consumer implements against the daemon socket API; op inventory source of truth is `go/internal/protocol/protocol.go` (`ClientMessage`, 11 ops).
+Status: draft. This describes the contract a third-party consumer implements against the daemon socket API; op inventory source of truth is `go/internal/protocol/protocol.go` (`ClientMessage`, 11 ops).
 
 All consumer RPCs are validated on both sides. Every input carries optional `socketPath` (future `backendRef` alias — see `docs/backend-adapter.md`).
 
@@ -15,14 +15,14 @@ All consumer RPCs are validated on both sides. Every input carries optional `soc
 
 - Input: `{id, decision: approve|deny, socketPath?}`.
 - Output: `{recorded}`.
-- Server: sends `{verdict:{id,decision,by:"paseo"}}`; returns `{recorded: raw.recorded === true}`. Missing input → `{recorded:false}`. Fail-soft: `{recorded:false}` + `log.warn`.
+- Server: sends `{verdict:{id,decision,by:"consumer"}}`; returns `{recorded: raw.recorded === true}`. Missing input → `{recorded:false}`. Fail-soft: `{recorded:false}` + `log.warn`.
 - `by` is attribution only, never authority (see below).
 
 ## `approval.ack` — notify acknowledgement
 
 - Input: `{id (min 1), socketPath?}`.
 - Output: `{acked}`.
-- Server: sends `{ack:{id,by:"paseo"}}`. Missing/empty id → `{acked:false}`. Non-binding visibility signal ("seen + acted"); only meaningful for notify-kind items.
+- Server: sends `{ack:{id,by:"consumer"}}`. Missing/empty id → `{acked:false}`. Non-binding visibility signal ("seen + acted"); only meaningful for notify-kind items.
 
 ## `approval.recent` — history
 
@@ -40,14 +40,14 @@ All consumer RPCs are validated on both sides. Every input carries optional `soc
 
 ## `approval.telegram_info` / `approval.telegram_set_config` — Telegram fallback
 
-- `telegram_info` input `{socketPath?}` → output `{configured, botUsername?, chatId?, approvers[] (default []), status: connected|disconnected|unconfigured|error (default unconfigured), error?, notificationTarget: telegram|paseo|both (default both)}`. Unknown daemon status falls back to `configured?connected:unconfigured`. Client polls every 15s.
+- `telegram_info` input `{socketPath?}` → output `{configured, botUsername?, chatId?, approvers[] (default []), status: connected|disconnected|unconfigured|error (default unconfigured), error?, notificationTarget (channel selection; exact enum in protocol.go, default both)}`. Unknown daemon status falls back to `configured?connected:unconfigured`. Client polls every 15s.
 - `telegram_set_config` input `{botToken?, chatId?, approvers?, notificationTarget?, socketPath?}` → output `{success, botUsername?, error?}`. Missing input → `{success:false, error:"missing input"}`.
 - Both optional for third parties; capabilities flags gate the UI.
 
 ## `approval.health` — reachability probe
 
 - Input: `{socketPath?}` → output `{reachable, version?, pid?}`.
-- Server: sends `{version:{}}` with 1500ms socket timeout; unreachable → `{reachable:false}`. Client polls on the 3s cadence; drives the "2fadod down" header state.
+- Server: sends `{version:{}}` with 1500ms socket timeout; unreachable → `{reachable:false}`. Client polls on the 3s cadence; drives the "daemon down" header state.
 
 ## `approval.policy_add_rule` — policy shortcuts
 
@@ -55,7 +55,7 @@ All consumer RPCs are validated on both sides. Every input carries optional `soc
 - Server: empty pattern → `{success:false, error:"empty pattern"}`; daemon reject → `{success:false, error: raw.error ?? "daemon rejected rule"}`.
 - Client derives pattern from scope: `exact` = full argv, `base` = `[resolvedBinary]`, `custom` = edited prefix (`*` = single-arg wildcard). Optional for third parties.
 
-## Polling cadences (client)
+## Polling cadences (third-party consumer)
 
 | RPC | Cadence |
 |---|---|
@@ -66,4 +66,4 @@ All consumer RPCs are validated on both sides. Every input carries optional `soc
 
 ## `by` attribution note
 
-Verdicts/acks carry `by:"paseo"` into the daemon audit log next to Telegram's numeric ids — one log, two transports, same schema. No per-user allowlist in v0.8: the runtime exposes no verified clicker identity, so a names list would be theater. Real gating belongs daemon-side; `by` is attribution only, never authority. First recorded verdict wins; replays return `recorded:false`.
+Verdicts/acks carry `by:"consumer"` into the daemon audit log next to Telegram's numeric ids — one log, two transports, same schema. No per-user allowlist in v0.8: the runtime exposes no verified clicker identity, so a names list would be theater. Real gating belongs daemon-side; `by` is attribution only, never authority. First recorded verdict wins; replays return `recorded:false`.

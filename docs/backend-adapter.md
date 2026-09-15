@@ -1,8 +1,8 @@
 # Backend adapter — third-party contract
 
-Status: draft. Source: design report on Issue #28 (Forgejo) (contract inventory §1, adapter boundary §2). Source of truth for the op inventory: `go/internal/protocol/protocol.go` (`ClientMessage`, 11 ops: run, verdict, notify, ack, list, recent, status, telegram_info, telegram_set_config, policy_add_rule, version).
+Status: draft. Source of truth for the op inventory: `go/internal/protocol/protocol.go` (`ClientMessage`, 11 ops: run, verdict, notify, ack, list, recent, status, telegram_info, telegram_set_config, policy_add_rule, version).
 
-This page defines what a third-party backend implements so the 2fado plugin can consume it without `2fadod`.
+This page defines what a third-party backend implements so a third-party consumer can use it without the reference daemon.
 
 ## Transport (today)
 
@@ -11,13 +11,13 @@ This page defines what a third-party backend implements so the 2fado plugin can 
 - Frozen socket candidate order: per-call `socketPath` → `$TWOFADO_SOCKET` → `$FADO_SOCKET` → `/tmp/2fado.sock`. There is no `/run/2fado.sock` candidate.
 - Envelope (`protocol.ClientMessage`): exactly one field set. Third-party consumers use 8 of 11 ops; `run`, `notify`, `version` (+ `run detach`) are CLI-only today (see `docs/backend-cli.md`).
 
-## Op table (plugin → backend)
+## Op table (consumer → backend)
 
 | Socket op sent | Request shape (daemon side) | Response shape |
 |---|---|---|
 | `{list:{}}` | `ListRequest{}` | `PendingList{items: PendingItem{id,argv,uid,cwd,expires_in,step,confirm_of,preview,auth_url,kind,link,summary,acked,ack_by}}` |
-| `{verdict:{id,decision,by:"paseo"}}` | `VerdictSubmit{id,decision:approve\|deny,by}` | `VerdictAck{recorded}` |
-| `{ack:{id,by:"paseo"}}` | `AckSubmit{id,by}` | `AckResponse{acked}` |
+| `{verdict:{id,decision,by:"consumer"}}` | `VerdictSubmit{id,decision:approve\|deny,by}` | `VerdictAck{recorded}` |
+| `{ack:{id,by:"consumer"}}` | `AckSubmit{id,by}` | `AckResponse{acked}` |
 | `{recent:{limit}}` | `RecentRequest{limit}` | `RecentList{items: RecentItem{id,argv,cwd,decision,by,exit,output,step,confirm_of,auth_url,kind,link,summary,acked,ack_by}}` |
 | `{status:{id}}` | `StatusRequest{id}` | `StatusResponse{id,status,argv,cwd,uid,expires_in,decision,by,exit,output,step,confirm_of,preview,auth_url,kind,link,summary,acked,ack_by,ack_at}` |
 | `{telegram_info:{}}` | `TelegramInfoRequest{}` | `TelegramInfoResponse{configured,bot_username,chat_id,approvers,status:connected\|disconnected\|unconfigured\|error,error}` |
@@ -42,7 +42,7 @@ MAY: `preview{resolved_binary,target_cwd,affected_count,sample_paths,risk_level,
 
 ```ts
 interface ApprovalBackend {
-  kind: string; // e.g. "2fadod-socket" | "third-party-id"
+  kind: string; // e.g. "socket" | "third-party-id"
   capabilities: {
     recent: boolean; statusPoll: boolean; ack: boolean;
     policyRules: boolean; telegram: boolean; preview: boolean; twoStep: boolean;
@@ -60,7 +60,7 @@ interface ApprovalBackend {
 
 ## Settings key: `backendRef`
 
-Today `socketPath` rides in every RPC input and settings hold one socket path. Generalize to `backendRef` (socket path | URL | handle) with the old field kept as alias. Attribution `by:"paseo"` and any auth header/token become backend config, never client code.
+Today `socketPath` rides in every RPC input and settings hold one socket path. Generalize to `backendRef` (socket path | URL | handle) with the old field kept as alias. Attribution `by:"consumer"` and any auth header/token become backend config, never consumer code.
 
 ## Error / fail-soft rules
 
@@ -68,7 +68,7 @@ Keep today's fail-soft shape so third-party outages render the existing "unreach
 
 ## `version` handshake
 
-Recommend adopting the existing `version`-style handshake op (`{version:{}}` → `{version,git_commit,build_time,binary_sha256,pid}`, probed via `approval.health`) so the plugin can probe capabilities at settings-save time.
+Recommend adopting the existing `version`-style handshake op (`{version:{}}` → `{version,git_commit,build_time,binary_sha256,pid}`, probed via `approval.health`) so the consumer can probe capabilities at settings-save time.
 
 ## What stays 2fado-specific vs reusable
 

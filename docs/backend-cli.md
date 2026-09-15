@@ -1,6 +1,6 @@
 # Backend CLI — parity surface for third parties
 
-Status: draft. Source: design report on Issue #28 (Forgejo) (CLI outline §3). Daemon-side refs: `go/cmd/2fado/main.go` (subcommands, usage, env), `go/internal/client/client.go` (socket ops, exit codes), `go/internal/protocol/protocol.go` (envelope, request shapes — source of truth, `ClientMessage` 11 ops).
+Status: draft. Daemon-side refs: `go/cmd/2fado/main.go` (subcommands, usage, env), `go/internal/client/client.go` (socket ops, exit codes), `go/internal/protocol/protocol.go` (envelope, request shapes — source of truth, `ClientMessage` 11 ops).
 
 Third parties should mirror this surface for operator parity. Producer-side ops (`run`/`notify`) vs consumer-side ops (list/verdict/status) — whether both are required is an open question (see `docs/backend-adapter.md`).
 
@@ -28,7 +28,7 @@ Third parties should mirror this surface for operator parity. Producer-side ops 
 
 | Var(s) | Use | Default |
 |---|---|---|
-| `TWOFADO_SOCKET` → `FADO_SOCKET` | Daemon socket path (CLI + plugin candidate chain) | `/tmp/2fado.sock` |
+| `TWOFADO_SOCKET` → `FADO_SOCKET` | Daemon socket path (CLI candidate chain) | `/tmp/2fado.sock` |
 | `TWOFADO_CONF` → `FADO_CONF` → `2FADO_CONF` | Daemon config path (`daemon` subcommand) | `/etc/2fado/2fado.conf` |
 
 Note: the frozen socket candidate chain is per-call `socketPath` → `$TWOFADO_SOCKET` → `$FADO_SOCKET` → `/tmp/2fado.sock`. There is no `/run/2fado.sock` candidate.
@@ -43,4 +43,4 @@ Note: the frozen socket candidate chain is per-call `socketPath` → `$TWOFADO_S
 
 ## Socket ops behind the CLI
 
-Each subcommand is one JSON-lines envelope over the unix socket, one JSON line back, fresh connection per call: run, verdict, notify, ack, status, version, list, recent. Plugin ops (telegram_info, telegram_set_config, policy_add_rule) have no CLI subcommand.
+Each subcommand is one JSON-lines envelope over the unix socket, one JSON line back, fresh connection per call: run, verdict, notify, ack, status, version, list, recent. Daemon-only ops (telegram_info, telegram_set_config, policy_add_rule) have no CLI subcommand.

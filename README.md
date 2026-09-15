@@ -27,15 +27,12 @@ go/          Go module (stdlib only): single `2fado` binary —
 bin/         build output (`make build`, gitignored)
 etc/         2fado.conf.example (__TELEGRAM_BOT_TOKEN__ / __TELEGRAM_USER_ID__),
               policy.json.example, 2fadod.service.example
-docs/spec.md            general spec (superseded pre-PoC research, kept for
-                        history — not the current plan; see docs/poc.md)
-docs/options/           four tool compositions researched (step-ca, Authentik,
-                        Authelia, Rauthy, privacyIDEA) — superseded pre-PoC
-                        research, kept for history; the Go PoC + Telegram +
-                        Paseo plugin is what shipped
-docs/comparison.md      option matrix (superseded, historical)
-docs/recommendation.md  recommended stack + build order (superseded, historical)
 docs/poc.md             runbook: try the PoC in two terminals, no root needed
+docs/backend-cli.md     CLI usage reference
+docs/backend-api.md     daemon socket API reference for third-party consumers
+docs/backend-adapter.md third-party backend contract (design)
+docs/toctou-suspended-execution.md
+                        design decision: suspended execution vs TOCTOU race
 ```
 
 ## Try it (no root, no token)
