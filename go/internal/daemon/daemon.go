@@ -15,6 +15,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -295,6 +296,13 @@ func handle(svc *service.Service, c net.Conn) {
 		out, err = json.Marshal(svc.TelegramSetConfig(*msg.TelegramSetConfig, uid))
 	case msg.PolicyAddRule != nil:
 		out, err = json.Marshal(svc.PolicyAddRule(*msg.PolicyAddRule, uid))
+	case msg.Help != nil:
+		ops, ok := protocol.Describe(msg.Help.Op)
+		if !ok {
+			writeError(c, "unknown-help-op:"+msg.Help.Op)
+			return
+		}
+		out, err = json.Marshal(protocol.HelpResponse{Ops: ops})
 	case msg.Version != nil:
 		out, err = json.Marshal(protocol.VersionResponse{
 			Version:      daemonVersion,
@@ -304,7 +312,7 @@ func handle(svc *service.Service, c net.Conn) {
 			PID:          os.Getpid(),
 		})
 	default:
-		writeError(c, "unknown-request")
+		writeError(c, "unknown-request: valid ops: "+strings.Join(protocol.OpKeys(), ","))
 		return
 	}
 	if err != nil {

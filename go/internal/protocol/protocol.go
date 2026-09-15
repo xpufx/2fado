@@ -5,6 +5,11 @@
 // this binary knowing what MCP is.
 package protocol
 
+import (
+	"reflect"
+	"strings"
+)
+
 // RunRequest is what the client sends: the exact argv plus the caller's
 // execution context for environment reconstruction.
 type RunRequest struct {
@@ -47,6 +52,7 @@ type ClientMessage struct {
 	TelegramSetConfig *TelegramSetConfigRequest `json:"telegram_set_config,omitempty"`
 	PolicyAddRule     *PolicyAddRuleRequest     `json:"policy_add_rule,omitempty"`
 	Version           *VersionRequest           `json:"version,omitempty"`
+	Help              *HelpRequest              `json:"help,omitempty"`
 }
 
 // NotifyRequest asks the daemon to create a no-exec notify-only petition:
@@ -73,6 +79,34 @@ type AckResponse struct {
 }
 
 type VersionRequest struct{}
+
+// HelpRequest asks the daemon to describe its own socket API. Empty Op
+// lists every op; a named Op returns that op's request/response shapes.
+type HelpRequest struct {
+	Op string `json:"op,omitempty"`
+}
+
+// FieldShape describes one struct field in wire terms.
+type FieldShape struct {
+	Name     string `json:"name"`
+	JSON     string `json:"json"`
+	Type     string `json:"type"`
+	Optional bool   `json:"optional"`
+}
+
+// OpInfo describes one socket op: envelope key plus request/response types.
+type OpInfo struct {
+	Op             string       `json:"op"`
+	Request        string       `json:"request"`
+	Response       string       `json:"response"`
+	RequestFields  []FieldShape `json:"request_fields"`
+	ResponseFields []FieldShape `json:"response_fields"`
+}
+
+// HelpResponse answers a HelpRequest.
+type HelpResponse struct {
+	Ops []OpInfo `json:"ops"`
+}
 
 type VersionResponse struct {
 	Version      string `json:"version"`
@@ -385,7 +419,105 @@ type VerdictRecord struct {
 	UnixNano int64  `json:"unix_nano"`
 }
 
-// AuditEvent is one JSON line in the append-only log.
+// responseTypes maps envelope keys to their response types. It lives
+// here, next to the structs, so the daemon derives everything below
+// via reflection instead of mirroring shapes by hand.
+var responseTypes = map[string]reflect.Type{
+	"run":                 reflect.TypeFor[RunResult](),
+	"verdict":             reflect.TypeFor[VerdictAck](),
+	"notify":              reflect.TypeFor[RunResult](),
+	"ack":                 reflect.TypeFor[AckResponse](),
+	"list":                reflect.TypeFor[PendingList](),
+	"recent":              reflect.TypeFor[RecentList](),
+	"status":              reflect.TypeFor[StatusResponse](),
+	"telegram_info":       reflect.TypeFor[TelegramInfoResponse](),
+	"telegram_set_config": reflect.TypeFor[TelegramSetConfigResponse](),
+	"policy_add_rule":     reflect.TypeFor[PolicyAddRuleResponse](),
+	"version":             reflect.TypeFor[VersionResponse](),
+	"help":                reflect.TypeFor[HelpResponse](),
+}
+
+// ShapeOf reflects over a struct type and returns its wire field shapes.
+func ShapeOf(t reflect.Type) []FieldShape {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return nil
+	}
+	out := make([]FieldShape, 0, t.NumField())
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if !f.IsExported() {
+			continue
+		}
+		tag := f.Tag.Get("json")
+		name := strings.SplitN(tag, ",", 2)[0]
+		if name == "" {
+			name = strings.ToLower(f.Name)
+		}
+		if name == "-" {
+			continue
+		}
+		out = append(out, FieldShape{
+			Name:     f.Name,
+			JSON:     name,
+			Type:     f.Type.String(),
+			Optional: strings.Contains(tag, "omitempty"),
+		})
+	}
+	return out
+}
+
+// OpKeys returns the valid ClientMessage envelope keys in field order.
+func OpKeys() []string {
+	t := reflect.TypeFor[ClientMessage]()
+	keys := make([]string, 0, t.NumField())
+	for i := 0; i < t.NumField(); i++ {
+		tag := t.Field(i).Tag.Get("json")
+		name := strings.SplitN(tag, ",", 2)[0]
+		if name != "" && name != "-" {
+			keys = append(keys, name)
+		}
+	}
+	return keys
+}
+
+// Describe returns OpInfo for every envelope key, or just op when named.
+func Describe(op string) ([]OpInfo, bool) {
+	t := reflect.TypeFor[ClientMessage]()
+	var ops []OpInfo
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		key := strings.SplitN(f.Tag.Get("json"), ",", 2)[0]
+		if op != "" && key != op {
+			continue
+		}
+		rt := f.Type
+		for rt.Kind() == reflect.Pointer {
+			rt = rt.Elem()
+		}
+		info := OpInfo{
+			Op:             key,
+			Request:        rt.Name(),
+			RequestFields:  ShapeOf(rt),
+			ResponseFields: nil,
+		}
+		if resp, ok := responseTypes[key]; ok {
+			info.Response = resp.Name()
+			info.ResponseFields = ShapeOf(resp)
+		}
+		ops = append(ops, info)
+		if op != "" {
+			return ops, true
+		}
+	}
+	if op != "" {
+		return nil, false
+	}
+	return ops, true
+}
+
 type AuditEvent struct {
 	Ev         string   `json:"ev"` // request | verdict | allow | exec | confirm | confirmation_timeout | client_aborted | notify | ack | git_drift | fd_drift | seal_drift | suspend | resume
 	UID        uint32   `json:"uid,omitempty"`
