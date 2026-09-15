@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/mirror-github.sh — DRAFT ONLY. DO NOT RUN.
+# scripts/mirror-github.sh — draft. Dry-run is safe; the first real push is operator-gated.
 #
 # Code-only push of the 2fado tree to the private GitHub mirror.
 # Modeled on the workspace mirror script in the main monorepo
@@ -19,9 +19,11 @@
 #      so the draft itself can never leak or trip the gate. The scanner
 #      path is configurable; missing scanner == abort. Extra patterns
 #      may be appended later in the platform repo without touching this
-#      tree. See issue #33 for the gate definition.
+#      tree. See issue #33 for the gate definition. The gate scans the
+#      PRUNED tree (the exact bytes that ship), never full HEAD — pruned
+#      agent/forge files are not part of the mirror and must not block it.
 #   2. secrets audit — inline entropy/file patterns only (no handle
-#      list); aborts on any hit in tree or history.
+#      list); aborts on any hit in the shipped (pruned) tree.
 #
 # Usage:
 #   scripts/mirror-github.sh [--dry-run] [--force]
@@ -62,30 +64,6 @@ URL="${GITHUB_URL:?set GITHUB_URL to the private mirror URL (operator provides)}
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 SCANNER="${PII_SCANNER:-$REPO_ROOT/../platform/bin/pii-preflight.sh}"
 
-# --- Preflight 1: no-PII gate via platform-owned scanner (fail closed).
-# The pattern list lives entirely in the platform repo. This script never
-# spells it out, so the draft stays clean and the scanner itself (untracked
-# here) never ships to the mirror.
-if [ ! -x "$SCANNER" ]; then
-	echo "[mirror-github] PII scanner missing/executable-bit unset: $SCANNER" >&2
-	echo "[mirror-github] Gate lives in the platform repo (untracked here by" >&2
-	echo "[mirror-github] design). Point PII_SCANNER at it or abort. Refusing to push." >&2
-	exit 1
-fi
-"$SCANNER" --tree HEAD || {
-	echo "[mirror-github] PII preflight FAILED — refusing to push." >&2
-	exit 1
-}
-echo "[mirror-github] Preflight 1 ok: platform PII scanner passed."
-
-# --- Preflight 2: secrets audit (fail closed).
-if git grep -I -n -E 'ghp_|github_pat_|xox[bpas]-|AKIA|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|sk-ant-' --cached -- . ':!plugin/node_modules' | grep -v '^Binary' ||
-	git log --all -G'ghp_|github_pat_|xox[bpas]-|AKIA|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|sk-ant-' --oneline -- . ':!plugin/node_modules' | grep .; then
-	echo "[mirror-github] SECRET PATTERN HIT — refusing to push." >&2
-	exit 1
-fi
-echo "[mirror-github] Preflight 2 ok: no secret patterns in tree/history."
-
 # --- Code-only prune list: forge/agent-internal paths never mirror.
 # (Issues, CI, internal links stay on the internal forge.)
 PRUNE=(
@@ -102,9 +80,10 @@ PRUNE=(
 )
 
 # --- Isolated temp index (monorepo pattern): never touches the worktree index.
-TMP_INDEX="$(mktemp -u)/git-index-mirror-$$"
+TMP_DIR="$(mktemp -d)"
+TMP_INDEX="$TMP_DIR/git-index-mirror"
 export GIT_INDEX_FILE="$TMP_INDEX"
-trap 'rm -f "$GIT_INDEX_FILE"' EXIT
+trap 'rm -rf "$TMP_DIR"' EXIT
 
 git read-tree HEAD
 for p in "${PRUNE[@]}"; do
@@ -113,6 +92,34 @@ done
 
 TREE_ID="$(git write-tree)"
 echo "[mirror-github] Prepared tree: $TREE_ID"
+
+# --- Preflight 1: no-PII gate via platform-owned scanner (fail closed).
+# Scans the PRUNED tree ($TREE_ID) — the exact bytes that ship — not HEAD.
+# The pattern list lives entirely in the platform repo. This script never
+# spells it out, so the draft stays clean and the scanner itself (untracked
+# here) never ships to the mirror.
+if [ ! -x "$SCANNER" ]; then
+	echo "[mirror-github] PII scanner missing/executable-bit unset: $SCANNER" >&2
+	echo "[mirror-github] Gate lives in the platform repo (untracked here by" >&2
+	echo "[mirror-github] design). Point PII_SCANNER at it or abort. Refusing to push." >&2
+	exit 1
+fi
+"$SCANNER" --tree "$TREE_ID" || {
+	echo "[mirror-github] PII preflight FAILED — refusing to push." >&2
+	exit 1
+}
+echo "[mirror-github] Preflight 1 ok: platform PII scanner passed (pruned tree $TREE_ID)."
+
+# --- Preflight 2: secrets audit (fail closed) on the PRUNED tree.
+# Scans the exact bytes that ship. This script is excluded: its own pattern
+# literal would otherwise match itself. Internal history is not scanned —
+# only the tree is pushed (the mirror commit's parent is the mirror HEAD,
+# never internal history; see header).
+if git grep -I -n -E -e 'ghp_|github_pat_|xox[bpas]-|AKIA|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|sk-ant-' "$TREE_ID" -- . ':!scripts/mirror-github.sh' | grep -v '^Binary'; then
+	echo "[mirror-github] SECRET PATTERN HIT — refusing to push." >&2
+	exit 1
+fi
+echo "[mirror-github] Preflight 2 ok: no secret patterns in shipped tree."
 
 # --- Parent = mirror HEAD for a clean fast-forward.
 DEST="$REMOTE"
