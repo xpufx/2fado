@@ -96,7 +96,7 @@ PRUNE=(
 	opencode.jsonc
 	paseo.json
 	scripts/forgejo-hook.mjs
-	plugin/node_modules
+	plugin
 	bin
 	daemon.log
 )
