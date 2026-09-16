@@ -33,7 +33,8 @@ pin so operators see what is held.
   escapes the freeze.
 - **Other UIDs unaffected.** A non-root daemon only signals the
   petition UID; cross-UID petitions skip the barrier (kernel would
-  deny them anyway). Root can signal any group.
+  deny them anyway). The daemon runs as its own user only in this
+  release; escalation is not in this release.
 - **Pre-stop race.** Mutations between `2fado run` and the daemon's
   `SIGSTOP` still land. Pair with fd pinning (`#36`) and git-tree
   drift (`#37`) for the entrypoint and workspace.

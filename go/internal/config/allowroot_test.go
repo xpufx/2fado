@@ -17,7 +17,7 @@ func TestParseAllowRootFailClosed(t *testing.T) {
 	}
 }
 
-func TestLoadAllowRootDefaultFalse(t *testing.T) {
+func TestLoadAllowRootNeverHonored(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "c.conf")
 	if err := os.WriteFile(f, []byte("SOCKET=/tmp/x.sock\n"), 0o644); err != nil {
@@ -30,13 +30,12 @@ func TestLoadAllowRootDefaultFalse(t *testing.T) {
 	if err := os.WriteFile(f, []byte("ALLOW_ROOT=1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if c := Load(f); !c.AllowRootExec {
-		t.Fatal("ALLOW_ROOT=1 must enable")
-	}
-	if err := os.WriteFile(f, []byte("ALLOW_ROOT=maybe\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	if c := Load(f); c.AllowRootExec {
-		t.Fatal("ambiguous value must fail closed to false")
+		t.Fatal("ALLOW_ROOT=1 must NOT enable escalation in this release (#54)")
+	}
+	t.Setenv("TWOFADO_ALLOW_ROOT", "1")
+	t.Setenv("FADO_ALLOW_ROOT", "1")
+	if c := Load(f); c.AllowRootExec {
+		t.Fatal("ALLOW_ROOT env must NOT enable escalation in this release (#54)")
 	}
 }

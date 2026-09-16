@@ -15,9 +15,8 @@ Live and ringing: single Go binary (`2fado daemon | run | approve|deny |
 notify | ack | status | version | socket-version`), stdlib-only, Telegram
 pager, verified end to end (approve-by-phone, deny-by-phone, timeout,
 sender allowlist, one-time tokens, audit log).
-Runs unprivileged — approved commands execute as you. Root execution
-(`target_user`) is implemented but parked: inert unless deliberately
-launched as root.
+Runs unprivileged — approved commands execute as the daemon user only;
+execution-identity escalation is not in this release.
 
 ```
 go/          Go module (stdlib only): single `2fado` binary —

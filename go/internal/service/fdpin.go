@@ -236,17 +236,18 @@ func (s Service) runPinned(argv []string, cwd string, env map[string]string, pin
 	if s.Conf.DryRun {
 		return 0, "would have run: " + strings.Join(argv, " "), uint32(os.Geteuid())
 	}
-	uid, err := s.targetUID()
-	if err != nil {
-		return 1, "2fadod: bad target_user: " + err.Error(), uint32(os.Geteuid())
+	uid, refusal := s.execIdentity(argv, cwd)
+	if refusal != nil {
+		return 1, *refusal, uid
 	}
 	flat := flatten(env)
-	cred, credErr := resolveCredential(uid)
-	if uid == uint32(os.Geteuid()) && os.Geteuid() != 0 {
-		cred = nil
-		credErr = nil
-	} else if credErr != nil {
-		return 1, "2fadod: bad target_user: " + credErr.Error(), uint32(os.Geteuid())
+	var cred *syscall.Credential
+	if escalationEnabled && (uid != uint32(os.Geteuid()) || os.Geteuid() == 0) {
+		var credErr error
+		cred, credErr = resolveCredential(uid)
+		if credErr != nil {
+			return 1, "2fadod: bad target_user: " + credErr.Error(), uint32(os.Geteuid())
+		}
 	}
 	if pin == nil {
 		return s.execPlain(argv, cwd, flat, uid, cred, onAuth)

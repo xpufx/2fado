@@ -32,6 +32,12 @@ var envDeny = regexp.MustCompile(`^(LD_|GLIBC_|GCONV_|DYLD_|IFS|BASH_FUNC_|BASHO
 
 const safePath = "/usr/sbin:/usr/bin:/sbin:/bin"
 
+// escalationEnabled is the internal release-off switch for #54 (Path A):
+// false means the daemon executes only as its own user. The uid-switching
+// code below stays in-tree but is unreachable while this is false. No
+// config value, CLI flag, environment variable, or API field may flip it.
+const escalationEnabled = false
+
 type dynamicState struct {
 	mu           sync.RWMutex
 	cancelPoll   context.CancelFunc
@@ -135,16 +141,58 @@ func (s Service) targetUID() (uint32, error) {
 	return uint32(n), nil
 }
 
-// rootExecAllowed is the pure uid-0 gate: only uid-0 is gated, and only
-// the daemon-start opt-in (allowRoot) permits it. euid is accepted for
-// future use and to keep call sites explicit; it does not alter the
-// decision. Runas-to-nonroot stays policy-driven.
+// execIdentity resolves the uid to execute as under the release switch.
+// Release (#54): always the daemon's own euid; any policy target resolving
+// to a different uid is a fail-closed refusal (no spawn) with an
+// escalation_disabled audit event. The escalation path behind
+// escalationEnabled stays in-tree for a later release.
+func (s Service) execIdentity(argv []string, cwd string) (uint32, *string) {
+	uid, err := s.targetUID()
+	if err != nil {
+		msg := "2fadod: bad target_user: " + err.Error()
+		return uint32(os.Geteuid()), &msg
+	}
+	self := uint32(os.Geteuid())
+	if !escalationEnabled {
+		if uid == 0 || uid != self {
+			s.Store.Append(protocol.AuditEvent{Ev: "escalation_disabled", UID: self,
+				Argv: argv, Cwd: cwd, AsUID: uid})
+			msg := "2fadod: refusing execution as another user (escalation is not in this release; runs as the daemon user only)"
+			return self, &msg
+		}
+		return self, nil
+	}
+	if !rootExecAllowed(uid, s.Conf.AllowRootExec, self) {
+		s.Store.Append(protocol.AuditEvent{Ev: "root_exec_blocked", UID: self,
+			Argv: argv, Cwd: cwd, AsUID: uid})
+		msg := "2fadod: refusing uid-0 execution (daemon started without --allow-root / ALLOW_ROOT=1)"
+		return self, &msg
+	}
+	return uid, nil
+}
+
+// rootExecAllowed is the pure uid-0 gate, kept behind the release switch
+// (#54 Path A: unreachable while escalationEnabled is false). Only uid-0
+// is gated, and only the daemon-start opt-in (allowRoot) permits it.
 func rootExecAllowed(targetUID uint32, allowRoot bool, euid uint32) bool {
 	_ = euid
 	if targetUID != 0 {
 		return true
 	}
 	return allowRoot
+}
+
+// displayUID reports the execution identity for approval surfaces (#53).
+// Under this release it is always the daemon user.
+func (s Service) displayUID() uint32 {
+	if !escalationEnabled {
+		return uint32(os.Geteuid())
+	}
+	uid, err := s.targetUID()
+	if err != nil {
+		return uint32(os.Geteuid())
+	}
+	return uid
 }
 
 // resolveCredential builds the full credential set for the target UID:
@@ -184,19 +232,14 @@ func (s Service) ExecuteWithChallenge(argv []string, cwd string, env map[string]
 	if s.Conf.DryRun {
 		return 0, "would have run: " + strings.Join(argv, " "), uint32(os.Geteuid())
 	}
-	uid, err := s.targetUID()
-	if err != nil {
-		return 1, "2fadod: bad target_user: " + err.Error(), uint32(os.Geteuid())
-	}
-	if !rootExecAllowed(uid, s.Conf.AllowRootExec, uint32(os.Geteuid())) {
-		s.Store.Append(protocol.AuditEvent{Ev: "root_exec_blocked", UID: uint32(os.Geteuid()),
-			Argv: argv, Cwd: cwd, AsUID: uid})
-		return 1, "2fadod: refusing uid-0 execution (daemon started without --allow-root / ALLOW_ROOT=1)", uid
+	uid, refusal := s.execIdentity(argv, cwd)
+	if refusal != nil {
+		return 1, *refusal, uid
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = cwd
 	cmd.Env = flatten(env)
-	if uid != uint32(os.Geteuid()) || os.Geteuid() == 0 {
+	if escalationEnabled && (uid != uint32(os.Geteuid()) || os.Geteuid() == 0) {
 		cred, err := resolveCredential(uid)
 		if err != nil {
 			return 1, "2fadod: bad target_user: " + err.Error(), uint32(os.Geteuid())
@@ -213,8 +256,7 @@ func (s Service) ExecuteWithChallenge(argv []string, cwd string, env map[string]
 	}
 	cmd.Stdout = out2
 	cmd.Stderr = out2
-	err = cmd.Run()
-	if err != nil {
+	if err := cmd.Run(); err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
 			return ee.ExitCode(), b.String(), uid
 		}
@@ -269,10 +311,7 @@ func (s Service) RunWithPeerCancel(req protocol.RunRequest, uid uint32, peerPID 
 	rid := newRID()
 	expires := time.Now().Add(time.Duration(s.Conf.Timeout) * time.Second)
 	preview := PreviewImpact(req.Argv, req.Cwd, flatten(clean))
-	asUID, err := s.targetUID()
-	if err != nil {
-		asUID = uint32(os.Geteuid())
-	}
+	asUID := s.displayUID()
 	_ = s.Store.Save(protocol.PendingRecord{
 		Argv:    req.Argv,
 		UID:     uid,
@@ -365,9 +404,12 @@ func (s Service) confirm(rid1 string, req protocol.RunRequest, uid uint32, clean
 	}
 	rid := newRID()
 	expires := time.Now().Add(time.Duration(s.Conf.Timeout) * time.Second)
-	asUID, cerr := s.targetUID()
-	if cerr != nil {
+	asUID := s.displayUID()
+	if !escalationEnabled {
 		asUID = rec1.AsUID
+		if asUID != uint32(os.Geteuid()) {
+			asUID = uint32(os.Geteuid())
+		}
 	}
 	_ = s.Store.Save(protocol.PendingRecord{
 		Argv:      req.Argv,
@@ -871,10 +913,7 @@ func (s Service) activeTG() telegram.Client {
 }
 
 func (s Service) page(rid string, req protocol.RunRequest, uid uint32) {
-	asUID, err := s.targetUID()
-	if err != nil {
-		asUID = uint32(os.Geteuid())
-	}
+	asUID := s.displayUID()
 	if rec, lerr := s.Store.Load(rid); lerr == nil {
 		asUID = rec.AsUID
 	}

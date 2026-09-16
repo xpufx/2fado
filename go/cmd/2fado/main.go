@@ -113,11 +113,9 @@ func main() {
 			confPath = "/etc/2fado/2fado.conf"
 		}
 		conf := config.Load(confPath)
-		for _, a := range os.Args[2:] {
-			if a == "--allow-root" {
-				conf.AllowRootExec = true
-			}
-		}
+		// #54 Path A: --allow-root is release-hidden and not honored.
+		// Accepted-but-ignored args are deliberately NOT parsed so no
+		// runtime surface can enable escalation.
 		if err := daemon.Serve(service.New(conf)); err != nil {
 			fmt.Fprintln(os.Stderr, "2fadod: "+err.Error())
 			os.Exit(1)

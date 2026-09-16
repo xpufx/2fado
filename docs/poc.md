@@ -1,7 +1,7 @@
 # PoC runbook (no sudo, no root, no Telegram needed)
 
-Everything runs as your own user. Escalation is simulated: approved
-commands execute as you.
+Everything runs as your own user. The daemon executes only as its own
+user; escalation is not in this release.
 
 ## Build & try it
 
@@ -25,15 +25,16 @@ request record, one-time token consumed atomically (`O_EXCL` — one
 verdict wins), fail-closed timeout, env scrub + cwd reconstruction,
 append-only audit log, daemon-owned children the requestor can't signal.
 
-Fake for now: privilege (daemon runs as you; `target_user` resolves to
-self unless euid is 0 — escalation is parked, not live), approver
+Fake for now: privilege (daemon runs as you; `target_user` switching is
+disabled in this release — execution is always as the daemon user), approver
 identity (local CLI instead of SSO; Telegram `from.id` check is already
 coded for the bot path), pager (stdout until you paste the token).
 
 ## Growing up (in order)
 
 1. Paste token/id → phone approvals, still unprivileged. (Done — works.)
-2. Root service + systemd unit → real escalation via `target_user`.
+2. Root service + systemd unit → a later release may re-enable
+   escalation via `target_user`; not in this release.
 3. Policy tiers (allow/keyboard) → fewer buzzes.
 4. Approval UI + IdP → replaces inline taps when taps aren't enough.
 5. Planned `2fado kill` (not implemented — no such subcommand today) +

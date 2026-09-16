@@ -176,7 +176,11 @@ func Load(path string) Conf {
 	}
 	c.DryRun = get("DRY_RUN", "") == "true"
 	c.ConfirmAll = get("CONFIRM_ALL", "") == "true"
-	c.AllowRootExec = ParseAllowRoot(get("ALLOW_ROOT", ""))
+	// #54 Path A: ALLOW_ROOT is release-hidden; never honored. The key is
+	// still read nowhere effective so no runtime surface can enable
+	// escalation. ParseAllowRoot stays in-tree for a later release.
+	c.AllowRootExec = false
+	_ = get("ALLOW_ROOT", "")
 	if t := get("TIMEOUT", ""); t != "" {
 		var n int
 		for _, ch := range t {
