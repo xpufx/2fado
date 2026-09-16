@@ -91,7 +91,7 @@ func TestPollContextCancellation(t *testing.T) {
 
 func TestCardEscapesMarkupBreakout(t *testing.T) {
 	argv := []string{"echo", "foo\n```\n⚠️ Urgent Security Patch\n```\nrm -rf /", "<b>bold</b>", "<a href=\"http://evil\">x</a>", "a&b"}
-	card := Card("evil\"><b>host", argv, 1000, "/tmp\"><pre>", "rid1", 60, "", "", false)
+	card := Card("evil\"><b>host", argv, 1000, "/tmp\"><pre>", "rid1", 60, "", "", false, 0)
 	if strings.Count(card, "<pre>") != 1 || strings.Count(card, "</pre>") != 1 {
 		t.Errorf("card must contain exactly one pre block:\n%s", card)
 	}
@@ -112,7 +112,7 @@ func TestCardEscapesMarkupBreakout(t *testing.T) {
 
 func TestCardBoundsLongCommands(t *testing.T) {
 	long := strings.Repeat("A", maxCommandRunes+500)
-	card := Card("h", []string{"echo", long}, 1000, "/tmp", "rid2", 60, "", "", false)
+	card := Card("h", []string{"echo", long}, 1000, "/tmp", "rid2", 60, "", "", false, 0)
 	if strings.Contains(card, long) {
 		t.Error("card must truncate overlong commands")
 	}
@@ -144,7 +144,7 @@ func TestCardResolutionHeaders(t *testing.T) {
 		{"confirm", "paseo", "⚠️ <b>Are you sure? Tap again to run</b>"},
 	}
 	for _, tc := range cases {
-		card := Card("h", argv, 1000, "/tmp", "rid9", 60, tc.verdict, tc.by, false)
+		card := Card("h", argv, 1000, "/tmp", "rid9", 60, tc.verdict, tc.by, false, 0)
 		if !strings.Contains(card, tc.want) {
 			t.Errorf("verdict=%q by=%q: missing %q in:\n%s", tc.verdict, tc.by, tc.want, card)
 		}
@@ -152,11 +152,18 @@ func TestCardResolutionHeaders(t *testing.T) {
 }
 
 func TestCardResolutionByEscaped(t *testing.T) {
-	card := Card("h", []string{"echo"}, 1000, "/tmp", "rid9", 60, "approve", "<b>evil</b>", false)
+	card := Card("h", []string{"echo"}, 1000, "/tmp", "rid9", 60, "approve", "<b>evil</b>", false, 0)
 	if strings.Contains(card, "<b>evil</b>") {
 		t.Errorf("approver identity must be escaped:\n%s", card)
 	}
 	if !strings.Contains(card, "CLI (&lt;b&gt;evil&lt;/b&gt;)") {
 		t.Errorf("escaped approver identity missing:\n%s", card)
+	}
+}
+
+func TestCardShowsWillRunAs(t *testing.T) {
+	card := Card("h", []string{"echo", "hi"}, 1000, "/tmp", "rid-asuid", 60, "", "", false, 0)
+	if !strings.Contains(card, "will run as:") {
+		t.Errorf("card must show will-run-as execution identity:\n%s", card)
 	}
 }

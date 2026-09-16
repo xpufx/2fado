@@ -276,6 +276,7 @@ type StatusResponse struct {
 	Argv      []string       `json:"argv,omitempty"`
 	Cwd       string         `json:"cwd,omitempty"`
 	UID       uint32         `json:"uid,omitempty"`
+	AsUID     uint32         `json:"as_uid,omitempty"`
 	ExpiresIn int64          `json:"expires_in,omitempty"`
 	Decision  string         `json:"decision,omitempty"`
 	By        string         `json:"by,omitempty"`
@@ -308,6 +309,7 @@ type PendingItem struct {
 	ID        string         `json:"id"`
 	Argv      []string       `json:"argv"`
 	UID       uint32         `json:"uid"`
+	AsUID     uint32         `json:"as_uid,omitempty"`
 	Cwd       string         `json:"cwd"`
 	ExpiresIn int64          `json:"expires_in"`
 	Step      string         `json:"step,omitempty"`
@@ -344,6 +346,7 @@ type RecentItem struct {
 	ID        string     `json:"id"`
 	Argv      []string   `json:"argv"`
 	Cwd       string     `json:"cwd"`
+	AsUID     uint32     `json:"as_uid,omitempty"`
 	Decision  string     `json:"decision"`
 	By        string     `json:"by,omitempty"`
 	Exit      int        `json:"exit"`
@@ -387,6 +390,7 @@ type VerdictAck struct {
 type PendingRecord struct {
 	Argv      []string          `json:"argv"`
 	UID       uint32            `json:"uid"`
+	AsUID     uint32            `json:"as_uid,omitempty"`
 	Cwd       string            `json:"cwd"`
 	Expires   int64             `json:"expires"`
 	Env       map[string]string `json:"env,omitempty"`

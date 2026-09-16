@@ -158,14 +158,14 @@ const maxCommandRunes = 1500
 // Verdict is "" while pending, "confirm" for the second-step challenge,
 // otherwise the resolution ("approve", "deny", "timeout", ...); by names
 // the resolution source and is shown on closed cards.
-func Card(host string, argv []string, uid uint32, cwd, rid string, expiresIn int64, verdict string, by string, dry bool) string {
+func Card(host string, argv []string, uid uint32, cwd, rid string, expiresIn int64, verdict string, by string, dry bool, asUID uint32) string {
 	head := resolutionHead(verdict, by, dry)
 	cmd := strings.Join(argv, " ")
 	if r := []rune(cmd); len(r) > maxCommandRunes {
 		cmd = string(r[:maxCommandRunes]) + "…[truncated]"
 	}
-	return fmt.Sprintf("%s\n🖥️ host: <code>%s</code>\n👤 caller: <code>%s</code>\n📁 cwd: <code>%s</code>\n⌨️ command:\n<pre><code>%s</code></pre>\n🕒 expires in %ds · request <code>%s</code>",
-		head, html.EscapeString(host), html.EscapeString(Who(uid)), html.EscapeString(cwd), html.EscapeString(cmd), expiresIn, html.EscapeString(rid))
+	return fmt.Sprintf("%s\n🖥️ host: <code>%s</code>\n👤 caller: <code>%s</code>\n🔑 will run as: <code>%s</code>\n📁 cwd: <code>%s</code>\n⌨️ command:\n<pre><code>%s</code></pre>\n🕒 expires in %ds · request <code>%s</code>",
+		head, html.EscapeString(host), html.EscapeString(Who(uid)), html.EscapeString(Who(asUID)), html.EscapeString(cwd), html.EscapeString(cmd), expiresIn, html.EscapeString(rid))
 }
 
 // resolutionHead renders the card header, naming the decision source on

@@ -269,9 +269,14 @@ func (s Service) RunWithPeerCancel(req protocol.RunRequest, uid uint32, peerPID 
 	rid := newRID()
 	expires := time.Now().Add(time.Duration(s.Conf.Timeout) * time.Second)
 	preview := PreviewImpact(req.Argv, req.Cwd, flatten(clean))
+	asUID, err := s.targetUID()
+	if err != nil {
+		asUID = uint32(os.Geteuid())
+	}
 	_ = s.Store.Save(protocol.PendingRecord{
 		Argv:    req.Argv,
 		UID:     uid,
+		AsUID:   asUID,
 		Cwd:     req.Cwd,
 		Expires: expires.Unix(),
 		Env:     clean,
@@ -360,9 +365,14 @@ func (s Service) confirm(rid1 string, req protocol.RunRequest, uid uint32, clean
 	}
 	rid := newRID()
 	expires := time.Now().Add(time.Duration(s.Conf.Timeout) * time.Second)
+	asUID, cerr := s.targetUID()
+	if cerr != nil {
+		asUID = rec1.AsUID
+	}
 	_ = s.Store.Save(protocol.PendingRecord{
 		Argv:      req.Argv,
 		UID:       uid,
+		AsUID:     asUID,
 		Cwd:       req.Cwd,
 		Expires:   expires.Unix(),
 		Env:       clean,
@@ -387,7 +397,7 @@ func (s Service) confirm(rid1 string, req protocol.RunRequest, uid uint32, clean
 	left := int64(s.Conf.Timeout)
 	if s.notifyTelegram() && !s.isPlaceholder() && rec1.ChatID != "" {
 		s.activeTG().Edit(rec1.ChatID, rec1.MsgID, telegram.Card(s.Host, req.Argv,
-			uid, req.Cwd, rid, left, "confirm", by, s.Conf.DryRun),
+			uid, req.Cwd, rid, left, "confirm", by, s.Conf.DryRun, asUID),
 			telegram.Buttons(rid))
 	} else {
 		fmt.Printf("[pager:stdout] CONFIRM %s (confirm of %s) (approve: 2fado approve %s)\n", rid, rid1, rid)
@@ -861,8 +871,15 @@ func (s Service) activeTG() telegram.Client {
 }
 
 func (s Service) page(rid string, req protocol.RunRequest, uid uint32) {
+	asUID, err := s.targetUID()
+	if err != nil {
+		asUID = uint32(os.Geteuid())
+	}
+	if rec, lerr := s.Store.Load(rid); lerr == nil {
+		asUID = rec.AsUID
+	}
 	text := telegram.Card(s.Host, req.Argv, uid, req.Cwd, rid,
-		int64(s.Conf.Timeout), "", "", s.Conf.DryRun)
+		int64(s.Conf.Timeout), "", "", s.Conf.DryRun, asUID)
 	if s.notifyTelegram() && !s.isPlaceholder() {
 		cid := s.activeChatID()
 		tg := s.activeTG()
@@ -887,7 +904,7 @@ func (s Service) closeCard(rid string, req protocol.RunRequest, uid uint32, deci
 		left = 0
 	}
 	s.activeTG().Edit(rec.ChatID, rec.MsgID, telegram.Card(s.Host, req.Argv,
-		rec.UID, rec.Cwd, rid, left, decision, by, s.Conf.DryRun),
+		rec.UID, rec.Cwd, rid, left, decision, by, s.Conf.DryRun, rec.AsUID),
 		telegram.EmptyButtons())
 }
 

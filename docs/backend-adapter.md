@@ -15,11 +15,11 @@ This page defines what a third-party backend implements so a third-party consume
 
 | Socket op sent | Request shape (daemon side) | Response shape |
 |---|---|---|
-| `{list:{}}` | `ListRequest{}` | `PendingList{items: PendingItem{id,argv,uid,cwd,expires_in,step,confirm_of,preview,auth_url,kind,link,summary,acked,ack_by}}` |
+| `{list:{}}` | `ListRequest{}` | `PendingList{items: PendingItem{id,argv,uid,as_uid,cwd,expires_in,step,confirm_of,preview,auth_url,kind,link,summary,acked,ack_by}}` |
 | `{verdict:{id,decision,by:"consumer"}}` | `VerdictSubmit{id,decision:approve\|deny,by}` | `VerdictAck{recorded}` |
 | `{ack:{id,by:"consumer"}}` | `AckSubmit{id,by}` | `AckResponse{acked}` |
-| `{recent:{limit}}` | `RecentRequest{limit}` | `RecentList{items: RecentItem{id,argv,cwd,decision,by,exit,output,step,confirm_of,auth_url,kind,link,summary,acked,ack_by}}` |
-| `{status:{id}}` | `StatusRequest{id}` | `StatusResponse{id,status,argv,cwd,uid,expires_in,decision,by,exit,output,step,confirm_of,preview,auth_url,kind,link,summary,acked,ack_by,ack_at}` |
+| `{recent:{limit}}` | `RecentRequest{limit}` | `RecentList{items: RecentItem{id,argv,cwd,as_uid,decision,by,exit,output,step,confirm_of,auth_url,kind,link,summary,acked,ack_by}}` |
+| `{status:{id}}` | `StatusRequest{id}` | `StatusResponse{id,status,argv,cwd,uid,as_uid,expires_in,decision,by,exit,output,step,confirm_of,preview,auth_url,kind,link,summary,acked,ack_by,ack_at}` |
 | `{telegram_info:{}}` | `TelegramInfoRequest{}` | `TelegramInfoResponse{configured,bot_username,chat_id,approvers,status:connected\|disconnected\|unconfigured\|error,error}` |
 | `{telegram_set_config:{bot_token,chat_id,approvers}}` | `TelegramSetConfigRequest{bot_token?,chat_id?,approvers?}` | `TelegramSetConfigResponse{success,bot_username,error}` |
 | `{policy_add_rule:{target,match_type,pattern}}` | `PolicyAddRuleRequest{target:whitelist\|blacklist,match_type:exact\|base\|custom,pattern[]}` | `PolicyAddRuleResponse{success,error,rules_count}` |
