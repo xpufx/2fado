@@ -135,6 +135,18 @@ func (s Service) targetUID() (uint32, error) {
 	return uint32(n), nil
 }
 
+// rootExecAllowed is the pure uid-0 gate: only uid-0 is gated, and only
+// the daemon-start opt-in (allowRoot) permits it. euid is accepted for
+// future use and to keep call sites explicit; it does not alter the
+// decision. Runas-to-nonroot stays policy-driven.
+func rootExecAllowed(targetUID uint32, allowRoot bool, euid uint32) bool {
+	_ = euid
+	if targetUID != 0 {
+		return true
+	}
+	return allowRoot
+}
+
 // resolveCredential builds the full credential set for the target UID:
 // real primary GID plus supplementary groups, so the child drops every
 // caller group instead of inheriting e.g. root/wheel/sudo/docker.
@@ -175,6 +187,11 @@ func (s Service) ExecuteWithChallenge(argv []string, cwd string, env map[string]
 	uid, err := s.targetUID()
 	if err != nil {
 		return 1, "2fadod: bad target_user: " + err.Error(), uint32(os.Geteuid())
+	}
+	if !rootExecAllowed(uid, s.Conf.AllowRootExec, uint32(os.Geteuid())) {
+		s.Store.Append(protocol.AuditEvent{Ev: "root_exec_blocked", UID: uint32(os.Geteuid()),
+			Argv: argv, Cwd: cwd, AsUID: uid})
+		return 1, "2fadod: refusing uid-0 execution (daemon started without --allow-root / ALLOW_ROOT=1)", uid
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = cwd

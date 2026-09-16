@@ -23,6 +23,7 @@ type Conf struct {
 	ConfirmAll         bool
 	Pager              string
 	NotificationTarget string
+	AllowRootExec      bool
 }
 
 type UserConfig struct {
@@ -97,6 +98,18 @@ func SaveUserConfig(cfg UserConfig) error {
 	return os.Chmod(p, 0o600)
 }
 
+// ParseAllowRoot folds a raw ALLOW_ROOT value onto bool, fail-closed:
+// only 1/true/yes (case-insensitive, trimmed) enable; everything else,
+// including unreadable/ambiguous values, yields false.
+func ParseAllowRoot(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
 func Load(path string) Conf {
 	kv := map[string]string{}
 	if f, err := os.Open(path); err == nil {
@@ -163,6 +176,7 @@ func Load(path string) Conf {
 	}
 	c.DryRun = get("DRY_RUN", "") == "true"
 	c.ConfirmAll = get("CONFIRM_ALL", "") == "true"
+	c.AllowRootExec = ParseAllowRoot(get("ALLOW_ROOT", ""))
 	if t := get("TIMEOUT", ""); t != "" {
 		var n int
 		for _, ch := range t {

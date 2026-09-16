@@ -112,7 +112,13 @@ func main() {
 		if confPath == "" {
 			confPath = "/etc/2fado/2fado.conf"
 		}
-		if err := daemon.Serve(service.New(config.Load(confPath))); err != nil {
+		conf := config.Load(confPath)
+		for _, a := range os.Args[2:] {
+			if a == "--allow-root" {
+				conf.AllowRootExec = true
+			}
+		}
+		if err := daemon.Serve(service.New(conf)); err != nil {
 			fmt.Fprintln(os.Stderr, "2fadod: "+err.Error())
 			os.Exit(1)
 		}
