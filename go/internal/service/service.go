@@ -502,63 +502,66 @@ func (s Service) confirm(rid1 string, req protocol.RunRequest, uid uint32, clean
 }
 
 func (s Service) runApproved(rid string, req protocol.RunRequest, uid uint32, clean map[string]string) protocol.RunResult {
-	var pin *protocol.FDPin
-	var seal *protocol.SealPin
-	if rec, err := s.Store.Load(rid); err == nil {
-		pin = rec.FD
-		seal = rec.Seal
+	rec, err := s.Store.Load(rid)
+	if err != nil || len(rec.Argv) == 0 {
+		s.Store.Append(protocol.AuditEvent{Ev: "lost_record", Argv: req.Argv,
+			RID: rid, Decision: "block"})
+		s.Store.SaveResult(rid, -1, "lost-record: stored request is missing or corrupt")
+		return protocol.RunResult{Status: "denied", Reason: "lost-record"}
 	}
+	storedArgv, storedCwd := rec.Argv, rec.Cwd
+	pin, seal := rec.FD, rec.Seal
 	if drift := s.checkSealDrift(rid); drift != nil && drift.Drift {
-		s.Store.Append(protocol.AuditEvent{Ev: "seal_drift", Argv: req.Argv,
+		s.Store.Append(protocol.AuditEvent{Ev: "seal_drift", Argv: storedArgv,
 			RID: rid, Decision: "block", Summary: drift.Reason})
 		s.Store.SaveResult(rid, -1, "seal-drift: "+drift.Reason)
 		return protocol.RunResult{Status: "denied", Reason: "seal-drift: " + drift.Reason}
 	}
-	execArgv, execPin := req.Argv, pin
+	execArgv, execPin := storedArgv, pin
 	if seal != nil && len(seal.Files) > 0 && !s.Conf.DryRun {
 		dir, err := s.materializeSeal(rid)
 		if err != nil {
 			reason := "sealed artifact for approval is unusable"
-			s.Store.Append(protocol.AuditEvent{Ev: "seal_drift", Argv: req.Argv,
+			s.Store.Append(protocol.AuditEvent{Ev: "seal_drift", Argv: storedArgv,
 				RID: rid, Decision: "block", Summary: reason})
 			s.Store.SaveResult(rid, -1, "seal-drift: "+reason)
 			return protocol.RunResult{Status: "denied", Reason: "seal-drift: " + reason}
 		}
-		execArgv = sealedArgv(req.Argv, req.Cwd, seal, dir)
-		execPin = snapshotEntry(execArgv, req.Cwd)
+		execArgv = sealedArgv(storedArgv, storedCwd, seal, dir)
+		execPin = snapshotEntry(execArgv, storedCwd)
 	}
 	if drift := s.checkFDDrift(rid); drift != nil && drift.Drift {
-		s.Store.Append(protocol.AuditEvent{Ev: "fd_drift", Argv: req.Argv,
+		s.Store.Append(protocol.AuditEvent{Ev: "fd_drift", Argv: storedArgv,
 			RID: rid, Decision: "block", Summary: drift.Reason})
 		s.Store.SaveResult(rid, -1, "fd-drift: "+drift.Reason)
 		return protocol.RunResult{Status: "denied", Reason: "fd-drift: " + drift.Reason}
 	}
-	if drift := s.checkGitDrift(rid, req.Cwd); drift != nil && drift.Drift {
+	if drift := s.checkGitDrift(rid, storedCwd); drift != nil && drift.Drift {
 		decision := "warn"
 		if drift.Block {
 			decision = "block"
 		}
-		s.Store.Append(protocol.AuditEvent{Ev: "git_drift", Argv: req.Argv,
+		s.Store.Append(protocol.AuditEvent{Ev: "git_drift", Argv: storedArgv,
 			RID: rid, Decision: decision, Summary: drift.Reason})
 		if drift.Block {
 			s.Store.SaveResult(rid, -1, "git-drift: "+drift.Reason)
 			return protocol.RunResult{Status: "denied", Reason: "git-drift: " + drift.Reason}
 		}
-		code, out, asUID := s.runPinned(execArgv, req.Cwd, clean, execPin, func(authURL string) {
+		code, out, asUID := s.runPinned(execArgv, storedCwd, clean, execPin, func(authURL string) {
 			s.Store.SetAuthURL(rid, authURL)
 			s.notifyAuthURL(rid, req, authURL)
 		})
 		out = "WARNING: " + drift.Reason + ".\n" + out
-		s.Store.Append(protocol.AuditEvent{Ev: "exec", Argv: req.Argv,
+		s.Store.Append(protocol.AuditEvent{Ev: "exec", Argv: storedArgv,
 			RID: rid, AsUID: asUID, Exit: code, Dry: s.Conf.DryRun})
 		s.Store.SaveResult(rid, code, out)
 		return protocol.RunResult{Status: "allowed", Exit: code, Output: out}
 	}
-	code, out, asUID := s.runPinned(execArgv, req.Cwd, clean, execPin, func(authURL string) {
+	code, out, asUID := s.runPinned(execArgv, storedCwd, clean, execPin, func(authURL string) {
 		s.Store.SetAuthURL(rid, authURL)
 		s.notifyAuthURL(rid, req, authURL)
 	})
-	s.Store.Append(protocol.AuditEvent{Ev: "exec", Argv: req.Argv,
+	s.Store.Append(protocol.AuditEvent{Ev: "exec", Argv: storedArgv,
 		RID: rid, AsUID: asUID, Exit: code, Dry: s.Conf.DryRun})
 	s.Store.SaveResult(rid, code, out)
 	return protocol.RunResult{Status: "allowed", Exit: code, Output: out}

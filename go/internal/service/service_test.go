@@ -862,3 +862,30 @@ func TestAdoptOrphansPreservesEnv(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 }
+
+func TestRunApprovedUsesStoredDescriptor(t *testing.T) {
+	svc := testService(t, policy.Policy{Default: "ask"})
+	svc.Conf.DryRun = true
+	rid := "stored-descr-1"
+	stored := []string{"/bin/echo", "stored"}
+	if err := svc.Store.Save(protocol.PendingRecord{Argv: stored, UID: 1000, Cwd: t.TempDir(), Expires: time.Now().Add(time.Minute).Unix(), Step: "initial"}, rid); err != nil {
+		t.Fatal(err)
+	}
+	wire := protocol.RunRequest{Argv: []string{"/bin/echo", "wire-evil"}, Cwd: t.TempDir(), Env: map[string]string{}}
+	res := svc.runApproved(rid, wire, 1000, map[string]string{})
+	if res.Status != "allowed" {
+		t.Fatalf("runApproved = %+v, want allowed", res)
+	}
+	if !strings.Contains(res.Output, "stored") || strings.Contains(res.Output, "wire-evil") {
+		t.Fatalf("runApproved executed wire argv, output=%q", res.Output)
+	}
+}
+
+func TestRunApprovedMissingRecordFailsClosed(t *testing.T) {
+	svc := testService(t, policy.Policy{Default: "ask"})
+	svc.Conf.DryRun = true
+	res := svc.runApproved("no-such-rid", protocol.RunRequest{Argv: []string{"/bin/echo", "x"}, Cwd: t.TempDir()}, 1000, map[string]string{})
+	if res.Status != "denied" {
+		t.Fatalf("missing record must fail closed, got %+v", res)
+	}
+}
