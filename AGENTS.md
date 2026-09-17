@@ -1,15 +1,15 @@
 # Agent Workflow & Task Board Protocol
 
-This repository uses **Forgejo** (`forge.mrs.aager.de/oktay/2fado`) as its issue tracking board and primary git remote.
+This repository uses **Forgejo** (`forge.mrs.uppidi.com/xpufx-org/2fado`) as its issue tracking board and primary git remote.
 
 ## 1. Issue Tracking with `fgjx`
 All task pickup, status changes, and handoffs must go through `fgjx`:
 ```bash
 # Check issues on this repository
-fgjx issue list --hostname forge.mrs.aager.de -R oktay/2fado
+fgjx --hostname forge.mrs.uppidi.com -R xpufx-org/2fado issue list
 
 # View an issue and full thread
-fgjx issue view <ID> --hostname forge.mrs.aager.de -R oktay/2fado
+fgjx --hostname forge.mrs.uppidi.com -R xpufx-org/2fado issue view <ID>
 ```
 
 ## 2. Coding Skills Installed
