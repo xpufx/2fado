@@ -5,7 +5,6 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -236,7 +235,7 @@ func (s Service) ExecuteWithChallenge(argv []string, cwd string, env map[string]
 	if refusal != nil {
 		return 1, *refusal, uid
 	}
-	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd := execCmdContext(context.Background(), argv[0], argv[1:])
 	cmd.Dir = cwd
 	cmd.Env = flatten(env)
 	if escalationEnabled && (uid != uint32(os.Geteuid()) || os.Geteuid() == 0) {
@@ -249,20 +248,27 @@ func (s Service) ExecuteWithChallenge(argv []string, cwd string, env map[string]
 			Setsid:     true,
 		}
 	}
-	var b bytes.Buffer
-	out2 := io.Writer(&b)
+	maxOut := capBytes(s.Conf.MaxOutputBytes)
+	w := newCappedWriter(maxOut)
+	out2 := io.Writer(w)
 	if onAuth != nil {
-		out2 = challengeScanner(&b, onAuth)
+		out2 = challengeScanner(w, onAuth)
 	}
 	cmd.Stdout = out2
 	cmd.Stderr = out2
-	if err := cmd.Run(); err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			return ee.ExitCode(), b.String(), uid
-		}
-		return 1, b.String() + err.Error(), uid
+	d, useTimeout := execTimeout(s.Conf.ExecTimeoutSecs)
+	timedOut, runErr := runBounded(context.Background(), cmd, d, useTimeout)
+	captured := w.String()
+	if timedOut {
+		return 124, captured + "\n2fadod: execution timeout", uid
 	}
-	return 0, b.String(), uid
+	if runErr != nil {
+		if ee, ok := runErr.(*exec.ExitError); ok {
+			return ee.ExitCode(), captured, uid
+		}
+		return 1, captured + runErr.Error(), uid
+	}
+	return 0, captured, uid
 }
 
 func flatten(env map[string]string) []string {

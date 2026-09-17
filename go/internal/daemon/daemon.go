@@ -51,7 +51,19 @@ var (
 	MaxRequestBytes      = 1 << 20
 	RequestReadTimeout   = 15 * time.Second
 	ResponseWriteTimeout = 10 * time.Second
+	// MaxResponseOutputBytes bounds RunResult.Output bytes marshaled into
+	// the socket response (#60). Excess is cut with a truncation marker
+	// so the daemon never marshals unbounded output.
+	MaxResponseOutputBytes = 262144
 )
+
+// boundRunOutput truncates output with an explicit marker.
+func boundRunOutput(s string) string {
+	if len(s) <= MaxResponseOutputBytes {
+		return s
+	}
+	return s[:MaxResponseOutputBytes] + fmt.Sprintf("\n…[truncated %d bytes, ceiling %d bytes]", len(s)-MaxResponseOutputBytes, MaxResponseOutputBytes)
+}
 
 var (
 	daemonVersion   = "0.1.0-dev"
@@ -322,6 +334,7 @@ func handle(svc *service.Service, c net.Conn) {
 			once.Do(func() { close(disconnect) })
 		}()
 		res := svc.RunWithPeerCancel(*msg.Run, uid, peerPID, disconnect)
+		res.Output = boundRunOutput(res.Output)
 		out, err = json.Marshal(res)
 	case msg.List != nil:
 		out, err = json.Marshal(svc.List())

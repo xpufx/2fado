@@ -24,6 +24,16 @@ type Conf struct {
 	Pager              string
 	NotificationTarget string
 	AllowRootExec      bool
+	// ExecTimeoutSecs bounds wall-clock execution of spawned commands
+	// (TWOFADO_EXEC_TIMEOUT, seconds, default 120, 0 disables).
+	ExecTimeoutSecs int
+	// MaxOutputBytes caps captured stdout+stderr per execution
+	// (TWOFADO_MAX_OUTPUT_BYTES, bytes, default 262144). Excess is cut
+	// with an explicit truncation marker.
+	MaxOutputBytes int
+	// MaxTelegramBodyBytes caps a single Telegram Bot API response body
+	// read (TWOFADO_MAX_TELEGRAM_BODY_BYTES, bytes, default 1048576).
+	MaxTelegramBodyBytes int
 }
 
 type UserConfig struct {
@@ -159,6 +169,13 @@ func Load(path string) Conf {
 		Policy:   get("POLICY", "/etc/2fado/policy.json"),
 		Timeout:  300,
 		Pager:    get("PAGER", ""),
+		// #60: execution timeout + output ceilings. EXEC_TIMEOUT seconds
+		// (default 120); MAX_OUTPUT_BYTES (default 256 KiB);
+		// MAX_TELEGRAM_BODY_BYTES (default 1 MiB). Non-positive or
+		// unparsable values fall back to defaults.
+		ExecTimeoutSecs:      120,
+		MaxOutputBytes:       262144,
+		MaxTelegramBodyBytes: 1048576,
 	}
 	target := get("NOTIFICATION_TARGET", "")
 	if target == "" {
@@ -176,6 +193,15 @@ func Load(path string) Conf {
 	}
 	c.DryRun = get("DRY_RUN", "") == "true"
 	c.ConfirmAll = get("CONFIRM_ALL", "") == "true"
+	if n := parsePositiveInt(get("EXEC_TIMEOUT", "")); n > 0 {
+		c.ExecTimeoutSecs = n
+	}
+	if n := parsePositiveInt(get("MAX_OUTPUT_BYTES", "")); n > 0 {
+		c.MaxOutputBytes = n
+	}
+	if n := parsePositiveInt(get("MAX_TELEGRAM_BODY_BYTES", "")); n > 0 {
+		c.MaxTelegramBodyBytes = n
+	}
 	// #54 Path A: ALLOW_ROOT is release-hidden; never honored. The key is
 	// still read nowhere effective so no runtime surface can enable
 	// escalation. ParseAllowRoot stays in-tree for a later release.
@@ -191,6 +217,21 @@ func Load(path string) Conf {
 		}
 	}
 	return c
+}
+
+// parsePositiveInt parses a decimal int, returning <=0 on any invalid input.
+func parsePositiveInt(raw string) int {
+	n := 0
+	if raw == "" {
+		return 0
+	}
+	for _, ch := range raw {
+		if ch < '0' || ch > '9' {
+			return 0
+		}
+		n = n*10 + int(ch-'0')
+	}
+	return n
 }
 
 func (c Conf) ApproverSet() map[string]bool {

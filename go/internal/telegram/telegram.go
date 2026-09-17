@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"io"
 	"net/http"
 	"net/url"
 	"os/user"
@@ -67,6 +68,10 @@ func New(token string) Client {
 	return Client{Token: token, HTTP: &http.Client{Timeout: 40 * time.Second}}
 }
 
+// MaxBodyBytes bounds a single Bot API response body read (#60).
+// Overlong bodies are cut; callers see a JSON error instead of OOM.
+var MaxBodyBytes = int64(1 << 20)
+
 func (c Client) baseURL() string {
 	if c.BaseURL != "" {
 		return strings.TrimRight(c.BaseURL, "/")
@@ -95,7 +100,7 @@ func (c Client) callContext(ctx context.Context, method string, v url.Values) ([
 	}
 	defer resp.Body.Close()
 	var b bytes.Buffer
-	if _, err := b.ReadFrom(resp.Body); err != nil {
+	if _, err := io.Copy(&b, io.LimitReader(resp.Body, MaxBodyBytes)); err != nil {
 		return nil, err
 	}
 	return b.Bytes(), nil

@@ -7,7 +7,7 @@
 package service
 
 import (
-	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
@@ -261,43 +261,42 @@ func (s Service) runPinned(argv []string, cwd string, env map[string]string, pin
 	if cred != nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{Credential: cred, Setsid: true}
 	}
-	var b bytes.Buffer
-	out := io.Writer(&b)
+	return s.runCmdBounded(cmd, uid, onAuth)
+}
+
+// runCmdBounded wires capped capture + wall-clock group kill around cmd.
+func (s Service) runCmdBounded(cmd *exec.Cmd, uid uint32, onAuth func(string)) (int, string, uint32) {
+	maxOut := capBytes(s.Conf.MaxOutputBytes)
+	w := newCappedWriter(maxOut)
+	out := io.Writer(w)
 	if onAuth != nil {
-		out = challengeScanner(&b, onAuth)
+		out = challengeScanner(w, onAuth)
 	}
 	cmd.Stdout = out
 	cmd.Stderr = out
-	if err := cmd.Run(); err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			return ee.ExitCode(), b.String(), uid
-		}
-		return 1, b.String() + err.Error(), uid
+	d, useTimeout := execTimeout(s.Conf.ExecTimeoutSecs)
+	timedOut, runErr := runBounded(context.Background(), cmd, d, useTimeout)
+	captured := w.String()
+	if timedOut {
+		return 124, captured + "\n2fadod: execution timeout", uid
 	}
-	return 0, b.String(), uid
+	if runErr != nil {
+		if ee, ok := runErr.(*exec.ExitError); ok {
+			return ee.ExitCode(), captured, uid
+		}
+		return 1, captured + runErr.Error(), uid
+	}
+	return 0, captured, uid
 }
 
 // execPlain is the unpinned path: same credential/cwd/env handling as
 // runPinned without fd verification.
 func (s Service) execPlain(argv []string, cwd string, flat []string, uid uint32, cred *syscall.Credential, onAuth func(string)) (int, string, uint32) {
-	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd := execCmdContext(context.Background(), argv[0], argv[1:])
 	cmd.Dir = cwd
 	cmd.Env = flat
 	if cred != nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{Credential: cred, Setsid: true}
 	}
-	var b bytes.Buffer
-	out := io.Writer(&b)
-	if onAuth != nil {
-		out = challengeScanner(&b, onAuth)
-	}
-	cmd.Stdout = out
-	cmd.Stderr = out
-	if err := cmd.Run(); err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			return ee.ExitCode(), b.String(), uid
-		}
-		return 1, b.String() + err.Error(), uid
-	}
-	return 0, b.String(), uid
+	return s.runCmdBounded(cmd, uid, onAuth)
 }
