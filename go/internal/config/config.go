@@ -154,8 +154,8 @@ func Load(path string) Conf {
 	c := Conf{
 		BotToken: botToken,
 		ChatID:   chatID,
-		Socket:   get("SOCKET", "/tmp/2fado.sock"),
-		StateDir: get("STATE_DIR", "/tmp/2fado-state"),
+		Socket:   get("SOCKET", DefaultSocketPath()),
+		StateDir: get("STATE_DIR", DefaultStateDir()),
 		Policy:   get("POLICY", "/etc/2fado/policy.json"),
 		Timeout:  300,
 		Pager:    get("PAGER", ""),

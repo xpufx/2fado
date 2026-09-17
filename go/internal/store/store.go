@@ -30,7 +30,19 @@ func New(dir string) Store {
 }
 
 func (s Store) Init() error {
-	return os.MkdirAll(s.Pending, 0o755)
+	if err := os.MkdirAll(s.Pending, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(s.Dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(s.Pending, 0o700); err != nil {
+		return err
+	}
+	if err := validateAnchorDir(s.Dir); err != nil {
+		return err
+	}
+	return validateAnchorDir(s.Pending)
 }
 
 func (s Store) pendingPath(rid string) string {
@@ -42,8 +54,8 @@ func (s Store) Save(rec protocol.PendingRecord, rid string) error {
 	if err != nil {
 		return err
 	}
-	_ = os.MkdirAll(s.Pending, 0o755)
-	return os.WriteFile(s.pendingPath(rid), data, 0o600)
+	_ = os.MkdirAll(s.Pending, 0o700)
+	return writeNoFollow(s.pendingPath(rid), data, 0o600, false)
 }
 
 func (s Store) Load(rid string) (protocol.PendingRecord, error) {
@@ -91,13 +103,15 @@ func (s Store) Consume(rid, decision, by string) bool {
 		return false
 	}
 	f, err := os.OpenFile(filepath.Join(s.Pending, rid+".verdict"),
-		os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		os.O_WRONLY|os.O_CREATE|os.O_EXCL|noFollow, 0o600)
 	if err != nil {
 		return false
 	}
 	defer f.Close()
-	_, err = f.Write(data)
-	return err == nil
+	if _, err = f.Write(data); err != nil {
+		return false
+	}
+	return f.Sync() == nil
 }
 
 // Ack writes a non-binding acknowledgement exactly once (O_EXCL): first
@@ -116,13 +130,15 @@ func (s Store) Ack(rid, by string) bool {
 		return false
 	}
 	f, err := os.OpenFile(filepath.Join(s.Pending, rid+".ack"),
-		os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		os.O_WRONLY|os.O_CREATE|os.O_EXCL|noFollow, 0o600)
 	if err != nil {
 		return false
 	}
 	defer f.Close()
-	_, err = f.Write(data)
-	return err == nil
+	if _, err = f.Write(data); err != nil {
+		return false
+	}
+	return f.Sync() == nil
 }
 
 // AckInfo returns the acknowledgement for a notify petition, if any.
@@ -292,7 +308,7 @@ func (s Store) SaveResult(rid string, exit int, output string) {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(filepath.Join(s.Pending, rid+".result"), data, 0o600)
+	_ = writeNoFollow(filepath.Join(s.Pending, rid+".result"), data, 0o600, true)
 }
 
 func (s Store) loadResult(rid string) (int, string) {
@@ -625,12 +641,7 @@ func (s Store) Append(ev protocol.AuditEvent) {
 	if err != nil {
 		return
 	}
-	f, err := os.OpenFile(s.Audit, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	_, _ = f.Write(append(data, '\n'))
+	_ = appendNoFollow(s.Audit, append(data, '\n'), 0o600)
 }
 
 func (s Store) GetOffset() int64 {
@@ -649,7 +660,7 @@ func (s Store) GetOffset() int64 {
 }
 
 func (s Store) SetOffset(n int64) {
-	_ = os.WriteFile(s.Offset, []byte(itoa(n)), 0o600)
+	_ = writeNoFollow(s.Offset, []byte(itoa(n)), 0o600, true)
 }
 
 func itoa(n int64) string {

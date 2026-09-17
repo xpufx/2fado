@@ -14,10 +14,14 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
+
+	"2fado/internal/config"
 
 	"2fado/internal/protocol"
 	"2fado/internal/service"
@@ -77,11 +81,28 @@ func computeBinarySHA() string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func pidFilePath() string {
+func pidFilePath(stateDir string) string {
 	if p := os.Getenv("TWOFADO_PID_FILE"); p != "" {
 		return p
 	}
-	return "/tmp/2fado.pid"
+	return config.DefaultPidFile(stateDir)
+}
+
+func writePidFile(path string) error {
+	if dir := filepath.Dir(path); dir != "" {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if _, err := f.Write([]byte(strconv.Itoa(os.Getpid()))); err != nil {
+		return err
+	}
+	return f.Sync()
 }
 
 func peerUID(c net.Conn) uint32 {
@@ -131,9 +152,30 @@ func enforceSocketPerms(path string) error {
 
 func Serve(svc service.Service) error {
 	daemonBinarySHA = computeBinarySHA()
-	pidFile := pidFilePath()
-	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o644)
+	if err := config.EnsureAnchorDir(svc.Conf.StateDir); err != nil {
+		return err
+	}
+	if dir := filepath.Dir(svc.Conf.Socket); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+		if err := svc.Conf.ValidateAnchors(); err != nil {
+			return err
+		}
+	}
+	if err := svc.Store.Init(); err != nil {
+		return err
+	}
+	pidFile := pidFilePath(svc.Conf.StateDir)
+	if err := writePidFile(pidFile); err != nil {
+		return err
+	}
 	defer os.Remove(pidFile)
+	if fi, err := os.Lstat(svc.Conf.Socket); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("2fadod: socket %s is a symlink, refused", svc.Conf.Socket)
+		}
+	}
 	tryRemove(svc.Conf.Socket)
 	l, err := net.Listen("unix", svc.Conf.Socket)
 	if err != nil {
@@ -141,9 +183,6 @@ func Serve(svc service.Service) error {
 	}
 	defer l.Close()
 	if err := enforceSocketPerms(svc.Conf.Socket); err != nil {
-		return err
-	}
-	if err := svc.Store.Init(); err != nil {
 		return err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
