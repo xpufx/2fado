@@ -241,16 +241,12 @@ func (s Service) runPinned(argv []string, cwd string, env map[string]string, pin
 		return 1, *refusal, uid
 	}
 	flat := flatten(env)
-	var cred *syscall.Credential
-	if escalationEnabled && (uid != uint32(os.Geteuid()) || os.Geteuid() == 0) {
-		var credErr error
-		cred, credErr = resolveCredential(uid)
-		if credErr != nil {
-			return 1, "2fadod: bad target_user: " + credErr.Error(), uint32(os.Geteuid())
-		}
+	attrs, attrsErr := s.spawnAttrs(uid)
+	if attrsErr != nil {
+		return 1, "2fadod: bad target_user: " + attrsErr.Error(), uint32(os.Geteuid())
 	}
 	if pin == nil {
-		return s.execPlain(argv, cwd, flat, uid, cred, onAuth)
+		return s.execPlain(argv, cwd, flat, uid, attrs, onAuth)
 	}
 	fd, drift := openVerified(pin)
 	if drift != nil {
@@ -258,8 +254,8 @@ func (s Service) runPinned(argv []string, cwd string, env map[string]string, pin
 	}
 	defer fd.Close()
 	cmd := pinnedCmd(argv, cwd, flat, pin, fd)
-	if cred != nil {
-		cmd.SysProcAttr = &syscall.SysProcAttr{Credential: cred, Setsid: true}
+	if attrs != nil {
+		cmd.SysProcAttr = attrs
 	}
 	return s.runCmdBounded(cmd, uid, onAuth)
 }
@@ -291,12 +287,12 @@ func (s Service) runCmdBounded(cmd *exec.Cmd, uid uint32, onAuth func(string)) (
 
 // execPlain is the unpinned path: same credential/cwd/env handling as
 // runPinned without fd verification.
-func (s Service) execPlain(argv []string, cwd string, flat []string, uid uint32, cred *syscall.Credential, onAuth func(string)) (int, string, uint32) {
+func (s Service) execPlain(argv []string, cwd string, flat []string, uid uint32, attrs *syscall.SysProcAttr, onAuth func(string)) (int, string, uint32) {
 	cmd := execCmdContext(context.Background(), argv[0], argv[1:])
 	cmd.Dir = cwd
 	cmd.Env = flat
-	if cred != nil {
-		cmd.SysProcAttr = &syscall.SysProcAttr{Credential: cred, Setsid: true}
+	if attrs != nil {
+		cmd.SysProcAttr = attrs
 	}
 	return s.runCmdBounded(cmd, uid, onAuth)
 }

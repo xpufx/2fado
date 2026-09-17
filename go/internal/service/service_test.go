@@ -703,34 +703,6 @@ func TestRunDetachedDenyRecordsDenied(t *testing.T) {
 	}
 }
 
-func TestResolveCredentialCurrentUser(t *testing.T) {
-	uid := uint32(os.Getuid())
-	cred, err := resolveCredential(uid)
-	if err != nil {
-		t.Fatalf("resolveCredential(%d) failed: %v", uid, err)
-	}
-	if cred.Uid != uid {
-		t.Errorf("Uid = %d, want %d", cred.Uid, uid)
-	}
-	cur, err := user.LookupId(strconv.Itoa(os.Getuid()))
-	if err != nil {
-		t.Skipf("cannot look up current user: %v", err)
-	}
-	wantGid, _ := strconv.Atoi(cur.Gid)
-	if int(cred.Gid) != wantGid {
-		t.Errorf("Gid = %d, want primary gid %d (not uid)", cred.Gid, wantGid)
-	}
-	if cred.Groups == nil {
-		t.Error("Groups must be non-nil so the child drops caller groups")
-	}
-}
-
-func TestResolveCredentialUnknownUser(t *testing.T) {
-	if _, err := resolveCredential(4294967294); err == nil {
-		t.Error("expected error for nonexistent uid, got nil")
-	}
-}
-
 func TestExecuteUnknownTargetUserFailsClean(t *testing.T) {
 	svc := testService(t, policy.Policy{Default: "allow", Target: "4294967294"})
 	code, out, _ := svc.Execute([]string{"/bin/true"}, t.TempDir(), map[string]string{})

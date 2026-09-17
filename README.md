@@ -16,7 +16,11 @@ notify | ack | status | version | socket-version`), stdlib-only, Telegram
 pager, verified end to end (approve-by-phone, deny-by-phone, timeout,
 sender allowlist, one-time tokens, audit log).
 Runs unprivileged — approved commands execute as the daemon user only;
-execution-identity escalation is not in this release.
+execution-identity escalation is not in this release. The privilege-switching
+code is **not compiled into the default binary at all** (#61): `go build ./...`
+excludes `internal/service/escalation_on.go`, so the shipped binary provably
+lacks the escalation symbols. Build with `-tags escalation` to include it
+out-of-band for development.
 
 ```
 go/          Go module (stdlib only): single `2fado` binary —

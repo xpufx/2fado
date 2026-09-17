@@ -40,5 +40,23 @@ reload: ready
 vet:
 	cd go && go vet ./...
 
+# #61: the default build must exclude the escalation code entirely. This
+# target proves it: escalation_on.go must not appear in the default file
+# set, and resolveCredential must be undefined without the tag.
+verify-escalation-excluded:
+	@cd go && \
+	  if go list -f '{{range .GoFiles}}{{.}} {{end}}' ./internal/service | grep -q escalation_on.go; then \
+	    echo "FAIL: escalation_on.go compiled into default build"; exit 1; \
+	  fi; \
+	  if go list -tags escalation -f '{{range .GoFiles}}{{.}} {{end}}' ./internal/service | grep -q escalation_on.go; then \
+	    echo "ok: default excludes escalation_on.go; -tags escalation includes it"; \
+	  else \
+	    echo "FAIL: -tags escalation does not include escalation_on.go"; exit 1; \
+	  fi
+	@cd go && go test -tags escalation ./internal/service/ -run TestResolveCredential -count=1 >/dev/null && echo "ok: escalation tests pass under tag"
+
+test-escalation:
+	cd go && go test -tags escalation ./...
+
 fmt:
 	cd go && gofmt -w .
