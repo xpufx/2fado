@@ -78,6 +78,29 @@ routine webhook or dismiss it because it lacks a conventional command verb.
 - Pre-flight stands: never present unverified work for operator testing.
 - Verify is non-binding: resolve unilaterally with narration rather than park in mutual wait.
 
+## 7a. Composer silence & Front Desk routing
+
+Two standing operator rules. Both are binding.
+
+**Composer silence.** Do not narrate status, progress, reasoning, or summaries into
+the composer/chat channel. The composer is not a reporting surface. Point at the
+ticket — one line, or nothing at all. Long session summaries, per-step narration,
+and re-verification play-by-play are violations even when the content is correct.
+Substance belongs on the board (issue comment) or in a Front Desk message, never here.
+
+**Route all `attention/2-user` escalations to the Front Desk.** Anything needing
+operator eyes — approval, decision, verify request, question, credential/2FA —
+goes to the Front Desk agent:
+
+```bash
+paseo send --no-wait a9d6f401-c36a-418a-96ef-f0c55a8cebe2 <msg>
+```
+
+Front Desk is `a9d6f401-c36a-418a-96ef-f0c55a8cebe2` (cwd `~/code/meta`). Set
+`attention/2-user` on the ticket **and** send the Front Desk message; the label
+alone is not delivery. Verify the agent id with `paseo inspect` before first use —
+a wrong id fails silently into the void.
+
 ## 8. Presentation: clickable issue references
 
 - Every issue number in chat responses and issue comments MUST be a clickable Markdown link to `https://forge.mrs.uppidi.com/xpufx-org/paseo/issues/<n>` (e.g. [#98](https://forge.mrs.uppidi.com/xpufx-org/paseo/issues/98)). Never emit a bare `#nnn`.
