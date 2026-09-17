@@ -1,6 +1,6 @@
 # Backend API — third-party consumer RPC reference (`approval.*`)
 
-Status: draft. This describes the contract a third-party consumer implements against the daemon socket API; op inventory source of truth is `go/internal/protocol/protocol.go` (`ClientMessage`, 11 ops).
+Status: draft. This describes the contract a third-party consumer implements against the daemon socket API; op inventory source of truth is `go/internal/protocol/protocol.go` (`ClientMessage`, 12 ops: run, verdict, notify, ack, list, recent, status, telegram_info, telegram_set_config, policy_add_rule, version, help).
 
 All consumer RPCs are validated on both sides. Every input carries optional `socketPath` (future `backendRef` alias — see `docs/backend-adapter.md`).
 
@@ -67,3 +67,10 @@ All consumer RPCs are validated on both sides. Every input carries optional `soc
 ## `by` attribution note
 
 Verdicts/acks carry `by:"consumer"` into the daemon audit log next to Telegram's numeric ids — one log, two transports, same schema. No per-user allowlist in v0.8: the runtime exposes no verified clicker identity, so a names list would be theater. Real gating belongs daemon-side; `by` is attribution only, never authority. First recorded verdict wins; replays return `recorded:false`.
+
+## `approval.help` — op discovery (self-documenting API)
+
+- Input: `{help:{op?}}` — `op` is optional; when set, the response may be narrowed to that op.
+- Output: `{ops: [{op, request, response, request_fields[], response_fields[]}]}`. Each field shape is `{name, json, type, optional}`.
+- The list is derived over `go/internal/protocol/protocol.go` (`ClientMessage` + `OpKeys()`), so it cannot drift from the envelope — this is the machine-readable op inventory a consumer should read instead of scraping `--help` text.
+- Unrecognised envelope: the daemon replies with an error naming the valid ops (`unknown-request: valid ops: …`), so a probing consumer is guided rather than dead-ended.

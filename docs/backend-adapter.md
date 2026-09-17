@@ -1,6 +1,6 @@
 # Backend adapter — third-party contract
 
-Status: draft. Source of truth for the op inventory: `go/internal/protocol/protocol.go` (`ClientMessage`, 11 ops: run, verdict, notify, ack, list, recent, status, telegram_info, telegram_set_config, policy_add_rule, version).
+Status: draft. Source of truth for the op inventory: `go/internal/protocol/protocol.go` (`ClientMessage`, 12 ops: run, verdict, notify, ack, list, recent, status, telegram_info, telegram_set_config, policy_add_rule, version, help).
 
 This page defines what a third-party backend implements so a third-party consumer can use it without the reference daemon.
 
@@ -9,7 +9,7 @@ This page defines what a third-party backend implements so a third-party consume
 - Unix socket, JSON-lines: one JSON object + `\n` per request, one JSON line back, fresh connection per call.
 - Socket timeout 2000ms per candidate (`telegram_info` uses 8000ms); every RPC wrapped in a 5s-timeout, max-4-inflight guard.
 - Frozen socket candidate order: per-call `socketPath` → `$TWOFADO_SOCKET` → `$FADO_SOCKET` → `/tmp/2fado.sock`. There is no `/run/2fado.sock` candidate.
-- Envelope (`protocol.ClientMessage`): exactly one field set. Third-party consumers use 8 of 11 ops; `run`, `notify`, `version` (+ `run detach`) are CLI-only today (see `docs/backend-cli.md`).
+- Envelope (`protocol.ClientMessage`): exactly one field set. Third-party consumers use 8 of 12 ops (list, verdict, ack, recent, status, telegram_info, telegram_set_config, policy_add_rule — see the op table below); `run`, `notify`, `version`, `help` are CLI-only today (see `docs/backend-cli.md`).
 
 ## Op table (consumer → backend)
 

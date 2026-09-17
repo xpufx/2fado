@@ -1,6 +1,6 @@
 # Backend CLI — parity surface for third parties
 
-Status: draft. Daemon-side refs: `go/cmd/2fado/main.go` (subcommands, usage, env), `go/internal/client/client.go` (socket ops, exit codes), `go/internal/protocol/protocol.go` (envelope, request shapes — source of truth, `ClientMessage` 11 ops).
+Status: draft. Daemon-side refs: `go/cmd/2fado/main.go` (subcommands, usage, env), `go/internal/client/client.go` (socket ops, exit codes), `go/internal/protocol/protocol.go` (envelope, request shapes — source of truth, `ClientMessage` 12 ops).
 
 Third parties should mirror this surface for operator parity. Producer-side ops (`run`/`notify`) vs consumer-side ops (list/verdict/status) — whether both are required is an open question (see `docs/backend-adapter.md`).
 
