@@ -1076,6 +1076,10 @@ func (s Service) TelegramSetConfig(req protocol.TelegramSetConfigRequest, caller
 // through the verdict path.
 func (s Service) TelegramPump() {
 	for v := range s.Verdicts {
+		if v.Decision == "page" {
+			s.repage(v.RID, v.Idx)
+			continue
+		}
 		if v.Decision == "ack" {
 			if s.Store.Ack(v.RID, cleanBy("telegram:"+v.By)) {
 				s.Store.Append(protocol.AuditEvent{Ev: "ack", RID: v.RID, By: cleanBy("telegram:" + v.By)})
