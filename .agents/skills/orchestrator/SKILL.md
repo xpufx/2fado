@@ -93,10 +93,10 @@ operator eyes — approval, decision, verify request, question, credential/2FA �
 goes to the Front Desk agent:
 
 ```bash
-paseo send --no-wait a9d6f401-c36a-418a-96ef-f0c55a8cebe2 <msg>
+paseo send --no-wait 16f57736-1ebd-4cc8-9813-37b4cff3bab1 <msg>
 ```
 
-Front Desk is `a9d6f401-c36a-418a-96ef-f0c55a8cebe2` (cwd `~/code/meta`). Set
+Front Desk is `16f57736-1ebd-4cc8-9813-37b4cff3bab1` (cwd `~/code/meta`). Set
 `attention/2-user` on the ticket **and** send the Front Desk message; the label
 alone is not delivery. Verify the agent id with `paseo inspect` before first use —
 a wrong id fails silently into the void.
