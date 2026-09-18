@@ -169,6 +169,29 @@ Agents and Orchestrators evaluate the board using a two-step approach:
 - **Autonomous Execution (`attention/1-agent`, `size/0-cheap`):**
   Work quietly in your designated worktree/checkout without spamming chat.
 
+#### Running the 2fado daemon from a sandbox (agents)
+
+You usually cannot write `/tmp` or `~/.local/state`, so `make ready` /
+`make restart-daemon` **will fail**. Use the isolated dev daemon instead (#67):
+
+```bash
+make dev                      # isolated daemon under <repo>/.testrun/
+export TWOFADO_SOCKET=<repo>/.testrun/run/2fado.sock
+./bin/2fado socket-version    # confirms it is live
+make dev-stop                 # clean shutdown
+```
+
+Overrides honoured: `TWOFADO_SOCKET`, `TWOFADO_STATE_DIR`, `TWOFADO_RUN_DIR`,
+`TWOFADO_CONF`. Each worktree/branch can run its own instance without touching
+the host daemon — set the overrides to a worktree-local path.
+
+Two gotchas:
+- A daemon started by `make dev` **dies when the invoking shell exits**. For
+  sustained testing, launch it detached.
+- With no active systemd user session (`SYSTEMD_USER_ACTIVE=no` — the normal
+  case in a sandbox) this fallback is the *only* working path. Full detail:
+  `docs/daemon-service.md`.
+
 #### Mandatory: Paseo Plugin Helper UI Standards (Never Bespoke Raw React Native)
 When building or modifying client UI in Paseo plugins:
 1. **Reference Gold Standard**: Inspect `plugins/mcp-tools` as the canonical reference implementation. It adheres to all `paseo-plugin-helper` UI patterns.

@@ -25,7 +25,16 @@ Everything else (`spec/*`, `attention/*`, `state/*`, missing labels, one-word ti
 ## 3. Dispatch
 
 - One ticket = one worker. Isolate by package dir. Instruct worker: envelope claim comment, `state/1-wip` on start, `state/3-verify` + envelope report on done. Never `git add -A` (stage explicit paths only).
-- Tree conflicts gate dispatch: queue, don't collide. Single shared checkout means one worker in the tree at a time until worktree isolation (#52) exists.
+- Tree conflicts gate dispatch: queue, don't collide. **Worktree isolation now exists (#67)** — use it instead of serialising on a shared checkout.
+- **Isolated dev daemon (agents cannot use /tmp or ~/.local/state).** Run a branch-specific daemon entirely inside the repo:
+  ```bash
+  make dev          # starts an isolated daemon under .testrun/
+  export TWOFADO_SOCKET=<repo>/.testrun/run/2fado.sock
+  ./bin/2fado socket-version
+  make dev-stop
+  ```
+  `make dev` honours `TWOFADO_SOCKET`, `TWOFADO_STATE_DIR`, `TWOFADO_RUN_DIR`, `TWOFADO_CONF` (the latter is new in #67). When no systemd user session is active (`SYSTEMD_USER_ACTIVE=no`, the usual case in a sandbox) this fallback is the working path — `make ready`/`make restart-daemon` need `/tmp` and will fail.
+  Caveat: a daemon started by `make dev` dies when the invoking shell exits; for long-lived testing launch it detached. See `docs/daemon-service.md`.
 - Workers run via subagents; provider/model copied from a known-good session record, never guessed.
 
 ## 4. Pre-flight before human testing (only real gate)
