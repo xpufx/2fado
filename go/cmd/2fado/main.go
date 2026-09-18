@@ -2,6 +2,7 @@
 //
 //	2fado daemon            run the privileged service
 //	2fado run -- <argv...>  petition to execute
+//	2fado ask --question <q> --option <o> --option <o>  interactive choice
 //	2fado approve|deny <id> local verdict (PoC; production: SSO-bound UI)
 //	2fado status <id>       inspect state and execution result
 //	2fado version           print binary version and checksum
@@ -29,7 +30,7 @@ var (
 )
 
 func usage() int {
-	fmt.Println("usage: 2fado daemon | 2fado run -- <argv...> | 2fado approve|deny <id> | 2fado notify --link <url> --summary <text> [--ttl <dur>] | 2fado ack <id> | 2fado status <id> | 2fado list | 2fado recent [--limit N] | 2fado version")
+	fmt.Println("usage: 2fado daemon | 2fado run -- <argv...> | 2fado approve|deny <id> | 2fado notify --link <url> --summary <text> [--ttl <dur>] | 2fado ask --question <q> --option <o> --option <o> [--link <url>] [--ttl <dur>] | 2fado ack <id> | 2fado status <id> | 2fado list | 2fado recent [--limit N] | 2fado version")
 	return 2
 }
 
@@ -97,6 +98,56 @@ func notifyCmd(sock string, args []string) int {
 	return client.Notify(sock, link, summary, ttlSeconds)
 }
 
+// askCmd parses: 2fado ask --question <q> --option <o> [--option <o>...]
+// [--link <url>] [--ttl <dur>]. Blocks until the operator selects or TTL.
+func askCmd(sock string, args []string) int {
+	var question, link, ttlStr string
+	var options []string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--question":
+			if i+1 >= len(args) {
+				return usage()
+			}
+			i++
+			question = args[i]
+		case "--option":
+			if i+1 >= len(args) {
+				return usage()
+			}
+			i++
+			options = append(options, args[i])
+		case "--link":
+			if i+1 >= len(args) {
+				return usage()
+			}
+			i++
+			link = args[i]
+		case "--ttl":
+			if i+1 >= len(args) {
+				return usage()
+			}
+			i++
+			ttlStr = args[i]
+		default:
+			return usage()
+		}
+	}
+	if question == "" || len(options) < 2 {
+		return usage()
+	}
+	var ttlSeconds int64
+	if ttlStr != "" {
+		d, err := time.ParseDuration(ttlStr)
+		if err != nil || d <= 0 {
+			fmt.Fprintln(os.Stderr, "2fado: bad --ttl (try 30s, 5m, 1h)")
+			return 2
+		}
+		ttlSeconds = int64(d / time.Second)
+	}
+	return client.Ask(sock, question, options, link, ttlSeconds)
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		os.Exit(usage())
@@ -147,6 +198,8 @@ func main() {
 		os.Exit(client.Verdict(sock, os.Args[1], os.Args[2]))
 	case "notify":
 		os.Exit(notifyCmd(sock, os.Args[2:]))
+	case "ask":
+		os.Exit(askCmd(sock, os.Args[2:]))
 	case "ack":
 		if len(os.Args) != 3 {
 			os.Exit(usage())

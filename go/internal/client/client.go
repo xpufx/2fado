@@ -118,6 +118,34 @@ func Notify(sock, link, summary string, ttlSeconds int64) int {
 	return 1
 }
 
+// Ask ships a question + options and blocks until the operator selects one
+// or the petition expires. It prints the chosen option to stdout and exits
+// 0 on selection, 2 on timeout, 1 on rejection/transport error.
+func Ask(sock, question string, options []string, link string, ttlSeconds int64) int {
+	raw, err := call(sock, protocol.ClientMessage{
+		Ask: &protocol.AskRequest{Question: question, Options: options, Link: link, TTLSeconds: ttlSeconds},
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "2fado: "+err.Error())
+		return 1
+	}
+	var res protocol.AskResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		fmt.Fprintln(os.Stderr, "2fado: bad reply")
+		return 1
+	}
+	if res.Status == "selected" {
+		fmt.Println(res.Selection)
+		return 0
+	}
+	if res.Status == "timeout" {
+		fmt.Fprintf(os.Stderr, "2fado: ask timed out (id: %s)\n", res.ID)
+		return 2
+	}
+	fmt.Fprintf(os.Stderr, "2fado: ask rejected (%s)\n", res.Reason)
+	return 1
+}
+
 // Ack submits an acknowledgement for a notify petition id.
 func Ack(sock, id string) int {
 	raw, err := call(sock, protocol.ClientMessage{
