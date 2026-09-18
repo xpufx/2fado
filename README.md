@@ -29,8 +29,11 @@ go/          Go module (stdlib only): single `2fado` binary —
               typed protocol, service/transport split (MCP fork kept open)
 bin/         build output (`make build`, gitignored)
 etc/         2fado.conf.example (__TELEGRAM_BOT_TOKEN__ / __TELEGRAM_USER_ID__),
-              policy.json.example, 2fadod.service.example
+              policy.json.example, 2fadod.service (systemd --user unit),
+              2fadod@.service (templated instance unit), 2fadod.service.example
+              (future system/root layout, not used today)
 docs/poc.md             runbook: try the PoC in two terminals, no root needed
+docs/daemon-service.md  systemd --user service + isolated dev/worktree workflow
 docs/backend-cli.md     CLI usage reference
 docs/backend-api.md     daemon socket API reference for third-party consumers
 docs/backend-adapter.md third-party backend contract (design)
@@ -41,12 +44,20 @@ docs/toctou-suspended-execution.md
 ## Try it (no root, no token)
 
 ```sh
-make build
-./bin/2fado daemon &                             # pager=stdout in this mode
+make dev                                        # isolated daemon, repo-local socket/state
 ./bin/2fado run -- /bin/echo hi                 # terminal 1: waits
 ./bin/2fado approve <request-id>                # terminal 2: the human
+make dev-stop                                   # clean shutdown
 ```
-(TWOFADO_SOCKET/TWOFADO_STATE_DIR/TWOFADO_CONF env as in docs/poc.md; legacy FADO_* also supported.)
+
+`make dev` pins the daemon to a repo-local socket/state (`.testrun/`) and
+prints the exact env to export, so it never touches a real daemon. On a
+machine with a systemd user session, `make service-install` +
+`make restart-daemon` manages `2fadod.service` via `systemctl --user`
+instead. See docs/daemon-service.md.
+
+(TWOFADO_SOCKET/TWOFADO_STATE_DIR/TWOFADO_RUN_DIR/TWOFADO_CONF env as in
+docs/daemon-service.md; legacy FADO_* also supported.)
 
 Paste a bot token + your Telegram id into the config and terminal 2
 becomes your phone (outbound long-poll, no open ports).

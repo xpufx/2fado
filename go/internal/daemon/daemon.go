@@ -35,9 +35,11 @@ import (
 // suspended-execution barrier keys off the peer PID. Tightening the
 // mode shrinks who can even connect; it changes none of those gates.
 //
-// Compatibility: the default path stays /tmp/2fado.sock (shared dir,
-// pre-existing socket symlink/DoS caveats from #17 apply). Only the
-// mode changes, 0777 -> 0700; same-UID clients are unaffected.
+// The default socket lives under $XDG_RUNTIME_DIR/2fado (per-user 0700)
+// with a graceful /tmp/2fado.sock fallback when no runtime dir exists —
+// see config.DefaultSocketPath. The /tmp fallback carries the shared-dir
+// socket symlink/DoS caveats from #17; the mode change (0777 -> 0700)
+// shrinks who can connect, same-UID clients are unaffected.
 const SocketPerms = 0o700
 
 // Framing bounds: one newline-terminated JSON request per connection.
@@ -94,9 +96,6 @@ func computeBinarySHA() string {
 }
 
 func pidFilePath(stateDir string) string {
-	if p := os.Getenv("TWOFADO_PID_FILE"); p != "" {
-		return p
-	}
 	return config.DefaultPidFile(stateDir)
 }
 

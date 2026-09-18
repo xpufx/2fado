@@ -1,0 +1,35 @@
+# systemd --user unit for 2fadod (the unprivileged per-user daemon).
+#
+# Install with:  make service-install
+# Manage with:   systemctl --user {start,stop,restart,status} 2fadod
+# Logs:          journalctl --user -u 2fadod -f
+#
+# This is a USER unit, not the system unit in etc/2fadod.service.example
+# (that one is a future root/privileged layout, not used today).
+#
+# Socket/state/config are pinned to standard XDG paths via specifiers:
+#   %t = $XDG_RUNTIME_DIR   (e.g. /run/user/1000)
+#   %S = $XDG_STATE_HOME    (e.g. ~/.local/state)
+#   %h = $HOME
+# The daemon creates $XDG_RUNTIME_DIR/2fado and $XDG_STATE_HOME/2fado on
+# first start (mode 0700), so no manual mkdir is required.
+
+[Unit]
+Description=2fado out-of-band approval daemon (user)
+Documentation=https://forge.mrs.uppidi.com/xpufx-org/2fado
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/2fado daemon
+Environment=TWOFADO_SOCKET=%t/2fado/2fado.sock
+Environment=TWOFADO_STATE_DIR=%S/2fado
+Environment=TWOFADO_CONF=%h/.config/2fado/2fado.conf
+Restart=on-failure
+# User-scoped hardening. Escalation is intentionally absent from the
+# default build (#61), so NoNewPrivileges cannot break a needed path.
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target
