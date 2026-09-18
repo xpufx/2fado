@@ -1083,6 +1083,14 @@ func (s Service) TelegramPump() {
 			}
 			continue
 		}
+		if v.Decision == "ask" {
+			rec, err := s.Store.Load(v.RID)
+			if err != nil || v.Idx < 0 || v.Idx >= len(rec.Options) {
+				continue
+			}
+			s.Store.Select(v.RID, rec.Options[v.Idx], v.Idx, cleanBy("telegram:"+v.By))
+			continue
+		}
 		s.Store.Consume(v.RID, v.Decision, v.By)
 	}
 }

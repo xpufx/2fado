@@ -268,6 +268,58 @@ func NotifyButtons(link, rid string) string {
 	return string(kb)
 }
 
+// maxAskQuestionRunes bounds the rendered question on ask cards.
+const maxAskQuestionRunes = 1000
+
+// maxAskButtonRunes bounds each option button label (Telegram caps button
+// text; a long option must never drop the whole keyboard).
+const maxAskButtonRunes = 48
+
+// AskCard renders an interactive multi-choice question petition. While
+// pending it carries the question and a link; once chosen it shows the
+// winning option and its source. All untrusted fields are html-escaped.
+func AskCard(host, question, link, rid string, expiresIn int64, chosen bool, selection, by string) string {
+	q := question
+	if r := []rune(q); len(r) > maxAskQuestionRunes {
+		q = string(r[:maxAskQuestionRunes]) + "…[truncated]"
+	}
+	head := "❓ <b>Question — pick one</b>"
+	if chosen {
+		head = fmt.Sprintf("✅ <b>Chosen: %s</b>", html.EscapeString(selection))
+	}
+	card := fmt.Sprintf("%s\n🖥️ host: <code>%s</code>\n📝 question:\n<pre><code>%s</code></pre>",
+		head, html.EscapeString(host), html.EscapeString(q))
+	if link != "" {
+		card += "\n🔗 link: " + html.EscapeString(link)
+	}
+	if chosen {
+		card += fmt.Sprintf("\n👤 chosen by: <code>%s</code>", html.EscapeString(sourceLabel(by)))
+	}
+	return fmt.Sprintf("%s\n🕒 expires in %ds · ask <code>%s</code>", card, expiresIn, html.EscapeString(rid))
+}
+
+// AskButtons builds the inline keyboard for an ask card: one callback
+// button per option, data "ask:<rid>:<idx>". RecommendedIndex marks one
+// option with a star (best-effort highlight; -1 or out of range = none).
+func AskButtons(rid string, options []string, recommended int) string {
+	rows := make([][]InlineButton, 0, len(options))
+	for i, opt := range options {
+		label := fmt.Sprintf("%d. %s", i+1, opt)
+		if r := []rune(label); len(r) > maxAskButtonRunes {
+			label = string(r[:maxAskButtonRunes]) + "…"
+		}
+		if i == recommended {
+			label = "⭐ " + label
+		}
+		rows = append(rows, []InlineButton{{
+			Text: label,
+			Data: "ask:" + rid + ":" + strconv.Itoa(i),
+		}})
+	}
+	kb, _ := json.Marshal(Keyboard{Buttons: rows})
+	return string(kb)
+}
+
 // Send posts the card, returns the message id for later rewriting.
 func (c Client) Send(chatID, text, rid string) (int64, error) {
 	return c.SendWithMarkup(chatID, text, 0, keyboard(rid))
@@ -334,6 +386,8 @@ type Verdict struct {
 	RID      string
 	Decision string
 	By       string
+	// Idx is the chosen option index for ask callbacks; unused otherwise.
+	Idx int
 }
 
 // Poll loops getUpdates (outbound long-poll, no open ports) and delivers
@@ -372,7 +426,7 @@ func (c Client) Poll(ctx context.Context, offset int64, approvers map[string]boo
 		for _, u := range up.Result {
 			offset = u.ID + 1
 			data := u.Callback.Data
-			kind, rid, ok := splitVerdict(data)
+			kind, rid, idx, ok := splitVerdict(data)
 			if !ok {
 				continue
 			}
@@ -381,7 +435,7 @@ func (c Client) Poll(ctx context.Context, offset int64, approvers map[string]boo
 				continue
 			}
 			select {
-			case out <- Verdict{RID: rid, Decision: kind, By: by}:
+			case out <- Verdict{RID: rid, Decision: kind, By: by, Idx: idx}:
 			case <-ctx.Done():
 				return
 			}
@@ -389,6 +443,8 @@ func (c Client) Poll(ctx context.Context, offset int64, approvers map[string]boo
 				c.answer(u.Callback.ID, "approved — executing")
 			} else if kind == "ack" {
 				c.answer(u.Callback.ID, "acknowledged")
+			} else if kind == "ask" {
+				c.answer(u.Callback.ID, "answer recorded")
 			} else {
 				c.answer(u.Callback.ID, "denied")
 			}
@@ -397,15 +453,27 @@ func (c Client) Poll(ctx context.Context, offset int64, approvers map[string]boo
 	}
 }
 
-func splitVerdict(data string) (kind, rid string, ok bool) {
+func splitVerdict(data string) (kind, rid string, idx int, ok bool) {
+	if strings.HasPrefix(data, "ask:") {
+		rest := strings.TrimPrefix(data, "ask:")
+		i := strings.LastIndex(rest, ":")
+		if i <= 0 || i == len(rest)-1 {
+			return "", "", 0, false
+		}
+		n, err := strconv.Atoi(rest[i+1:])
+		if err != nil || n < 0 {
+			return "", "", 0, false
+		}
+		return "ask", rest[:i], n, true
+	}
 	if strings.HasPrefix(data, "approve:") {
-		return "approve", strings.TrimPrefix(data, "approve:"), true
+		return "approve", strings.TrimPrefix(data, "approve:"), 0, true
 	}
 	if strings.HasPrefix(data, "deny:") {
-		return "deny", strings.TrimPrefix(data, "deny:"), true
+		return "deny", strings.TrimPrefix(data, "deny:"), 0, true
 	}
 	if strings.HasPrefix(data, "ack:") {
-		return "ack", strings.TrimPrefix(data, "ack:"), true
+		return "ack", strings.TrimPrefix(data, "ack:"), 0, true
 	}
-	return "", "", false
+	return "", "", 0, false
 }

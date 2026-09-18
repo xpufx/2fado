@@ -154,3 +154,81 @@ func TestDaemonTelegramSocketEndpoints(t *testing.T) {
 	// 5. Clean up: unconfigure to terminate background poll loop
 	_ = sendAndRecv(`{"telegram_set_config":{"bot_token":""}}`)
 }
+
+// TestDaemonAskSocketRoundTrip exercises the ask op end to end over the
+// unix socket: the blocking call resolves once a selection is recorded.
+func TestDaemonAskSocketRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	sockPath := filepath.Join(tmpDir, "ask.sock")
+	t.Setenv("TWOFADO_USER_CONFIG", filepath.Join(tmpDir, "config.json"))
+
+	cfg := config.Conf{
+		Socket:   sockPath,
+		StateDir: tmpDir,
+		Timeout:  5,
+		Policy:   filepath.Join(tmpDir, "policy.json"),
+	}
+	svc := service.New(cfg)
+	go func() {
+		_ = Serve(svc)
+	}()
+	for i := 0; i < 50; i++ {
+		if conn, err := net.Dial("unix", sockPath); err == nil {
+			conn.Close()
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	type reply struct {
+		raw []byte
+		err error
+	}
+	got := make(chan reply, 1)
+	go func() {
+		c, err := net.Dial("unix", sockPath)
+		if err != nil {
+			got <- reply{err: err}
+			return
+		}
+		defer c.Close()
+		req := `{"ask":{"question":"pick one","options":["a","b","c"],"ttl_seconds":30}}`
+		if _, err := c.Write([]byte(req + "\n")); err != nil {
+			got <- reply{err: err}
+			return
+		}
+		line, err := bufio.NewReader(c).ReadBytes('\n')
+		got <- reply{raw: line, err: err}
+	}()
+
+	rid := ""
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && rid == "" {
+		if items := svc.List().Items; len(items) == 1 && items[0].Kind == "ask" {
+			rid = items[0].ID
+		} else {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if rid == "" {
+		t.Fatal("ask petition never appeared over the socket")
+	}
+	if !svc.Store.Select(rid, "b", 1, "telegram:42") {
+		t.Fatal("selection rejected")
+	}
+	select {
+	case r := <-got:
+		if r.err != nil {
+			t.Fatalf("socket read: %v", r.err)
+		}
+		var res protocol.AskResult
+		if err := json.Unmarshal(r.raw, &res); err != nil {
+			t.Fatalf("unmarshal ask result: %v (%s)", err, r.raw)
+		}
+		if res.Status != "selected" || res.Selection != "b" || res.SelectionIdx != 1 || res.ID != rid {
+			t.Fatalf("ask result = %+v", res)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("ask socket call did not return after selection")
+	}
+}

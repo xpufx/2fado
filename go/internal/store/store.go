@@ -154,6 +154,48 @@ func (s Store) AckInfo(rid string) *protocol.AckRecord {
 	return &a
 }
 
+// Select writes an ask-petition option choice exactly once (O_EXCL): the
+// first selection wins. Only valid on existing ask-kind records; other
+// kinds and unknown IDs are rejected.
+func (s Store) Select(rid, selection string, idx int, by string) bool {
+	rec, err := s.Load(rid)
+	if err != nil || rec.Kind != "ask" {
+		return false
+	}
+	data, err := json.Marshal(protocol.SelectionRecord{
+		Selection:    selection,
+		SelectionIdx: idx,
+		By:           by,
+		UnixNano:     time.Now().UnixNano(),
+	})
+	if err != nil {
+		return false
+	}
+	f, err := os.OpenFile(filepath.Join(s.Pending, rid+".selection"),
+		os.O_WRONLY|os.O_CREATE|os.O_EXCL|noFollow, 0o600)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	if _, err = f.Write(data); err != nil {
+		return false
+	}
+	return f.Sync() == nil
+}
+
+// SelectionInfo returns the recorded ask choice for a petition, if any.
+func (s Store) SelectionInfo(rid string) *protocol.SelectionRecord {
+	data, err := os.ReadFile(filepath.Join(s.Pending, rid+".selection"))
+	if err != nil {
+		return nil
+	}
+	var sel protocol.SelectionRecord
+	if err := json.Unmarshal(data, &sel); err != nil {
+		return nil
+	}
+	return &sel
+}
+
 // DefaultPruneTTL is the retention window for decided or expired records.
 const DefaultPruneTTL = 24 * time.Hour
 
@@ -174,7 +216,7 @@ func (s Store) Prune(olderThan time.Duration) (int, error) {
 		switch {
 		case strings.HasSuffix(name, ".json"):
 			rid = strings.TrimSuffix(name, ".json")
-		case strings.HasSuffix(name, ".verdict"), strings.HasSuffix(name, ".result"), strings.HasSuffix(name, ".ack"):
+		case strings.HasSuffix(name, ".verdict"), strings.HasSuffix(name, ".result"), strings.HasSuffix(name, ".ack"), strings.HasSuffix(name, ".selection"):
 			dot := strings.LastIndex(name, ".")
 			rid = name[:dot]
 		default:
@@ -185,11 +227,11 @@ func (s Store) Prune(olderThan time.Duration) (int, error) {
 		}
 		seen[rid] = true
 		rec, err := s.Load(rid)
-		if err == nil && s.Verdict(rid) == nil && s.AckInfo(rid) == nil && rec.Expires > now.Unix() {
+		if err == nil && s.Verdict(rid) == nil && s.AckInfo(rid) == nil && s.SelectionInfo(rid) == nil && rec.Expires > now.Unix() {
 			continue
 		}
 		oldest := now
-		for _, suf := range []string{".json", ".verdict", ".result", ".ack"} {
+		for _, suf := range []string{".json", ".verdict", ".result", ".ack", ".selection"} {
 			if fi, err := os.Stat(filepath.Join(s.Pending, rid+suf)); err == nil {
 				if fi.ModTime().Before(oldest) {
 					oldest = fi.ModTime()
@@ -210,6 +252,7 @@ func (s Store) Purge(rid string) error {
 	_ = os.Remove(filepath.Join(s.Pending, rid+".verdict"))
 	_ = os.Remove(filepath.Join(s.Pending, rid+".result"))
 	_ = os.Remove(filepath.Join(s.Pending, rid+".ack"))
+	_ = os.Remove(filepath.Join(s.Pending, rid+".selection"))
 	_ = os.Remove(filepath.Join(s.Dir, "sealed", rid+".tar.gz"))
 	_ = os.RemoveAll(filepath.Join(s.Dir, "sealed", rid+".d"))
 	return nil
@@ -259,6 +302,9 @@ func (s Store) List(now int64) []protocol.PendingItem {
 		if s.AckInfo(rid) != nil {
 			continue
 		}
+		if s.SelectionInfo(rid) != nil {
+			continue
+		}
 		rec, err := s.Load(rid)
 		if err != nil || rec.Expires <= now {
 			continue
@@ -268,19 +314,23 @@ func (s Store) List(now int64) []protocol.PendingItem {
 			step = "initial"
 		}
 		out = append(out, protocol.PendingItem{
-			ID:        rid,
-			Argv:      rec.Argv,
-			UID:       rec.UID,
-			AsUID:     rec.AsUID,
-			Cwd:       rec.Cwd,
-			ExpiresIn: rec.Expires - now,
-			Step:      step,
-			ConfirmOf: rec.ConfirmOf,
-			Preview:   rec.Preview,
-			AuthURL:   rec.AuthURL,
-			Kind:      rec.Kind,
-			Link:      rec.Link,
-			Summary:   rec.Summary,
+			ID:           rid,
+			Argv:         rec.Argv,
+			UID:          rec.UID,
+			AsUID:        rec.AsUID,
+			Cwd:          rec.Cwd,
+			ExpiresIn:    rec.Expires - now,
+			Step:         step,
+			ConfirmOf:    rec.ConfirmOf,
+			Preview:      rec.Preview,
+			AuthURL:      rec.AuthURL,
+			Kind:         rec.Kind,
+			Link:         rec.Link,
+			Summary:      rec.Summary,
+			Question:     rec.Question,
+			Options:      rec.Options,
+			Selection:    rec.Selection,
+			SelectionIdx: rec.SelectionIdx,
 		})
 	}
 	return out
@@ -339,7 +389,7 @@ func (s Store) Recent(limit int) []protocol.RecentItem {
 	var found []decided
 	for _, e := range entries {
 		name := e.Name()
-		if !strings.HasSuffix(name, ".verdict") && !strings.HasSuffix(name, ".ack") {
+		if !strings.HasSuffix(name, ".verdict") && !strings.HasSuffix(name, ".ack") && !strings.HasSuffix(name, ".selection") {
 			continue
 		}
 		dot := strings.LastIndex(name, ".")
@@ -389,6 +439,23 @@ func (s Store) Recent(limit int) []protocol.RecentItem {
 		}
 		v := s.Verdict(f.rid)
 		if v == nil {
+			if sel := s.SelectionInfo(f.rid); sel != nil {
+				out = append(out, protocol.RecentItem{
+					ID:           f.rid,
+					Cwd:          rec.Cwd,
+					AsUID:        rec.AsUID,
+					Decision:     "select",
+					By:           sel.By,
+					Exit:         -1,
+					Kind:         rec.Kind,
+					Link:         rec.Link,
+					Summary:      rec.Summary,
+					Question:     rec.Question,
+					Options:      rec.Options,
+					Selection:    sel.Selection,
+					SelectionIdx: sel.SelectionIdx,
+				})
+			}
 			continue
 		}
 		exit, output := s.loadResult(f.rid)
@@ -440,6 +507,28 @@ func (s Store) Status(rid string, now int64) protocol.StatusResponse {
 	step := rec.Step
 	if step == "" {
 		step = "initial"
+	}
+	if rec.Kind == "ask" {
+		st := protocol.StatusResponse{
+			ID: rid, Cwd: rec.Cwd, UID: rec.UID, AsUID: rec.AsUID, Exit: -1,
+			Step: step, Kind: rec.Kind, Link: rec.Link, Summary: rec.Summary,
+			Question: rec.Question, Options: rec.Options,
+		}
+		if sel := s.SelectionInfo(rid); sel != nil {
+			st.Status = "selected"
+			st.Decision = "select"
+			st.By = sel.By
+			st.Selection = sel.Selection
+			st.SelectionIdx = sel.SelectionIdx
+			return st
+		}
+		if rec.Expires > now {
+			st.Status = "pending"
+			st.ExpiresIn = rec.Expires - now
+			return st
+		}
+		st.Status = "timeout"
+		return st
 	}
 	if rec.Kind == "notify" {
 		if ack := s.AckInfo(rid); ack != nil {

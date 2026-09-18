@@ -322,6 +322,16 @@ func handle(svc *service.Service, c net.Conn) {
 	case msg.Notify != nil:
 		res := svc.Notify(*msg.Notify, uid)
 		out, err = json.Marshal(res)
+	case msg.Ask != nil:
+		disconnect := make(chan struct{})
+		var once sync.Once
+		go func() {
+			var b [1]byte
+			_, _ = c.Read(b[:])
+			once.Do(func() { close(disconnect) })
+		}()
+		res := svc.AskWithCancel(*msg.Ask, uid, disconnect)
+		out, err = json.Marshal(res)
 	case msg.Ack != nil:
 		ack := svc.Ack(*msg.Ack, uid)
 		out, err = json.Marshal(ack)

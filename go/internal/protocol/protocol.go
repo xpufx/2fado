@@ -44,6 +44,7 @@ type ClientMessage struct {
 	Run               *RunRequest               `json:"run,omitempty"`
 	Verdict           *VerdictSubmit            `json:"verdict,omitempty"`
 	Notify            *NotifyRequest            `json:"notify,omitempty"`
+	Ask               *AskRequest               `json:"ask,omitempty"`
 	Ack               *AckSubmit                `json:"ack,omitempty"`
 	List              *ListRequest              `json:"list,omitempty"`
 	Recent            *RecentRequest            `json:"recent,omitempty"`
@@ -76,6 +77,36 @@ type AckSubmit struct {
 type AckResponse struct {
 	Acked bool   `json:"acked"`
 	Error string `json:"error,omitempty"`
+}
+
+// AskRequest asks the daemon to create an interactive multi-choice
+// question petition: the operator picks one of Options. Link is an
+// optional context URL; TTLSeconds overrides the default TTL (0 =
+// default). MultiSelect, AllowWriteIn, and RecommendedIndex are part of
+// the wire schema from day one so the full ask_question matrix can land
+// later without a data migration; the MVP transports persist them but
+// render single-select only. RecommendedIndex is 1-based, 0 = none.
+type AskRequest struct {
+	Question         string   `json:"question"`
+	Options          []string `json:"options"`
+	Link             string   `json:"link,omitempty"`
+	TTLSeconds       int64    `json:"ttl_seconds,omitempty"`
+	MultiSelect      bool     `json:"multi_select,omitempty"`
+	AllowWriteIn     bool     `json:"allow_write_in,omitempty"`
+	RecommendedIndex int      `json:"recommended_index,omitempty"`
+}
+
+// AskResult is the daemon's final answer to an ask petition. Status is
+// selected (Selection set) | timeout | denied. ID names the petition;
+// SelectionIdx is the chosen option index, By names the operator channel.
+type AskResult struct {
+	Status       string `json:"status"`
+	ID           string `json:"id,omitempty"`
+	Question     string `json:"question,omitempty"`
+	Selection    string `json:"selection,omitempty"`
+	SelectionIdx int    `json:"selection_idx,omitempty"`
+	By           string `json:"by,omitempty"`
+	Reason       string `json:"reason,omitempty"`
 }
 
 type VersionRequest struct{}
@@ -271,34 +302,38 @@ type SuspendPin struct {
 // StatusResponse is the answer to a StatusRequest.
 // Status is one of: not_found | pending | confirming | running | completed | denied | timeout | client_aborted | acked.
 type StatusResponse struct {
-	ID        string         `json:"id"`
-	Status    string         `json:"status"`
-	Argv      []string       `json:"argv,omitempty"`
-	Cwd       string         `json:"cwd,omitempty"`
-	UID       uint32         `json:"uid,omitempty"`
-	AsUID     uint32         `json:"as_uid,omitempty"`
-	ExpiresIn int64          `json:"expires_in,omitempty"`
-	Decision  string         `json:"decision,omitempty"`
-	By        string         `json:"by,omitempty"`
-	Exit      int            `json:"exit"`
-	Output    string         `json:"output,omitempty"`
-	Step      string         `json:"step,omitempty"`
-	ConfirmOf string         `json:"confirm_of,omitempty"`
-	Preview   *PreviewRecord `json:"preview,omitempty"`
-	AuthURL   string         `json:"auth_url,omitempty"`
-	Kind      string         `json:"kind,omitempty"`
-	Link      string         `json:"link,omitempty"`
-	Summary   string         `json:"summary,omitempty"`
-	Acked     bool           `json:"acked,omitempty"`
-	AckBy     string         `json:"ack_by,omitempty"`
-	AckAt     int64          `json:"ack_at,omitempty"`
-	Git       *GitPin        `json:"git,omitempty"`
-	GitDrift  *GitDrift      `json:"git_drift,omitempty"`
-	FD        *FDPin         `json:"fd,omitempty"`
-	FDDrift   *FDDrift       `json:"fd_drift,omitempty"`
-	Seal      *SealPin       `json:"seal,omitempty"`
-	SealDrift *SealDrift     `json:"seal_drift,omitempty"`
-	Suspend   *SuspendPin    `json:"suspend,omitempty"`
+	ID           string         `json:"id"`
+	Status       string         `json:"status"`
+	Argv         []string       `json:"argv,omitempty"`
+	Cwd          string         `json:"cwd,omitempty"`
+	UID          uint32         `json:"uid,omitempty"`
+	AsUID        uint32         `json:"as_uid,omitempty"`
+	ExpiresIn    int64          `json:"expires_in,omitempty"`
+	Decision     string         `json:"decision,omitempty"`
+	By           string         `json:"by,omitempty"`
+	Exit         int            `json:"exit"`
+	Output       string         `json:"output,omitempty"`
+	Step         string         `json:"step,omitempty"`
+	ConfirmOf    string         `json:"confirm_of,omitempty"`
+	Preview      *PreviewRecord `json:"preview,omitempty"`
+	AuthURL      string         `json:"auth_url,omitempty"`
+	Kind         string         `json:"kind,omitempty"`
+	Link         string         `json:"link,omitempty"`
+	Summary      string         `json:"summary,omitempty"`
+	Question     string         `json:"question,omitempty"`
+	Options      []string       `json:"options,omitempty"`
+	Selection    string         `json:"selection,omitempty"`
+	SelectionIdx int            `json:"selection_idx,omitempty"`
+	Acked        bool           `json:"acked,omitempty"`
+	AckBy        string         `json:"ack_by,omitempty"`
+	AckAt        int64          `json:"ack_at,omitempty"`
+	Git          *GitPin        `json:"git,omitempty"`
+	GitDrift     *GitDrift      `json:"git_drift,omitempty"`
+	FD           *FDPin         `json:"fd,omitempty"`
+	FDDrift      *FDDrift       `json:"fd_drift,omitempty"`
+	Seal         *SealPin       `json:"seal,omitempty"`
+	SealDrift    *SealDrift     `json:"seal_drift,omitempty"`
+	Suspend      *SuspendPin    `json:"suspend,omitempty"`
 }
 
 // ListRequest asks for pending records (plugin server polls this).
@@ -306,28 +341,32 @@ type ListRequest struct{}
 
 // PendingItem is one row of the list answer.
 type PendingItem struct {
-	ID        string         `json:"id"`
-	Argv      []string       `json:"argv"`
-	UID       uint32         `json:"uid"`
-	AsUID     uint32         `json:"as_uid,omitempty"`
-	Cwd       string         `json:"cwd"`
-	ExpiresIn int64          `json:"expires_in"`
-	Step      string         `json:"step,omitempty"`
-	ConfirmOf string         `json:"confirm_of,omitempty"`
-	Preview   *PreviewRecord `json:"preview,omitempty"`
-	AuthURL   string         `json:"auth_url,omitempty"`
-	Kind      string         `json:"kind,omitempty"`
-	Link      string         `json:"link,omitempty"`
-	Summary   string         `json:"summary,omitempty"`
-	Acked     bool           `json:"acked,omitempty"`
-	AckBy     string         `json:"ack_by,omitempty"`
-	Git       *GitPin        `json:"git,omitempty"`
-	GitDrift  *GitDrift      `json:"git_drift,omitempty"`
-	FD        *FDPin         `json:"fd,omitempty"`
-	FDDrift   *FDDrift       `json:"fd_drift,omitempty"`
-	Seal      *SealPin       `json:"seal,omitempty"`
-	SealDrift *SealDrift     `json:"seal_drift,omitempty"`
-	Suspend   *SuspendPin    `json:"suspend,omitempty"`
+	ID           string         `json:"id"`
+	Argv         []string       `json:"argv"`
+	UID          uint32         `json:"uid"`
+	AsUID        uint32         `json:"as_uid,omitempty"`
+	Cwd          string         `json:"cwd"`
+	ExpiresIn    int64          `json:"expires_in"`
+	Step         string         `json:"step,omitempty"`
+	ConfirmOf    string         `json:"confirm_of,omitempty"`
+	Preview      *PreviewRecord `json:"preview,omitempty"`
+	AuthURL      string         `json:"auth_url,omitempty"`
+	Kind         string         `json:"kind,omitempty"`
+	Link         string         `json:"link,omitempty"`
+	Summary      string         `json:"summary,omitempty"`
+	Question     string         `json:"question,omitempty"`
+	Options      []string       `json:"options,omitempty"`
+	Selection    string         `json:"selection,omitempty"`
+	SelectionIdx int            `json:"selection_idx,omitempty"`
+	Acked        bool           `json:"acked,omitempty"`
+	AckBy        string         `json:"ack_by,omitempty"`
+	Git          *GitPin        `json:"git,omitempty"`
+	GitDrift     *GitDrift      `json:"git_drift,omitempty"`
+	FD           *FDPin         `json:"fd,omitempty"`
+	FDDrift      *FDDrift       `json:"fd_drift,omitempty"`
+	Seal         *SealPin       `json:"seal,omitempty"`
+	SealDrift    *SealDrift     `json:"seal_drift,omitempty"`
+	Suspend      *SuspendPin    `json:"suspend,omitempty"`
 }
 
 // PendingList answers ListRequest: unexpired, undecided records only.
@@ -343,25 +382,29 @@ type RecentRequest struct {
 // RecentItem is one decided record with its verdict and execution result.
 // Exit is -1 and Output empty when nothing executed (denied/timeout).
 type RecentItem struct {
-	ID        string     `json:"id"`
-	Argv      []string   `json:"argv"`
-	Cwd       string     `json:"cwd"`
-	AsUID     uint32     `json:"as_uid,omitempty"`
-	Decision  string     `json:"decision"`
-	By        string     `json:"by,omitempty"`
-	Exit      int        `json:"exit"`
-	Output    string     `json:"output,omitempty"`
-	Step      string     `json:"step,omitempty"`
-	ConfirmOf string     `json:"confirm_of,omitempty"`
-	AuthURL   string     `json:"auth_url,omitempty"`
-	Kind      string     `json:"kind,omitempty"`
-	Link      string     `json:"link,omitempty"`
-	Summary   string     `json:"summary,omitempty"`
-	Acked     bool       `json:"acked,omitempty"`
-	AckBy     string     `json:"ack_by,omitempty"`
-	GitDrift  *GitDrift  `json:"git_drift,omitempty"`
-	FDDrift   *FDDrift   `json:"fd_drift,omitempty"`
-	SealDrift *SealDrift `json:"seal_drift,omitempty"`
+	ID           string     `json:"id"`
+	Argv         []string   `json:"argv"`
+	Cwd          string     `json:"cwd"`
+	AsUID        uint32     `json:"as_uid,omitempty"`
+	Decision     string     `json:"decision"`
+	By           string     `json:"by,omitempty"`
+	Exit         int        `json:"exit"`
+	Output       string     `json:"output,omitempty"`
+	Step         string     `json:"step,omitempty"`
+	ConfirmOf    string     `json:"confirm_of,omitempty"`
+	AuthURL      string     `json:"auth_url,omitempty"`
+	Kind         string     `json:"kind,omitempty"`
+	Link         string     `json:"link,omitempty"`
+	Summary      string     `json:"summary,omitempty"`
+	Question     string     `json:"question,omitempty"`
+	Options      []string   `json:"options,omitempty"`
+	Selection    string     `json:"selection,omitempty"`
+	SelectionIdx int        `json:"selection_idx,omitempty"`
+	Acked        bool       `json:"acked,omitempty"`
+	AckBy        string     `json:"ack_by,omitempty"`
+	GitDrift     *GitDrift  `json:"git_drift,omitempty"`
+	FDDrift      *FDDrift   `json:"fd_drift,omitempty"`
+	SealDrift    *SealDrift `json:"seal_drift,omitempty"`
 }
 
 // RecentList answers RecentRequest: decided records, newest first.
@@ -388,25 +431,32 @@ type VerdictAck struct {
 // this — never anything that crossed a wire.
 // Kind is "" for exec petitions, "notify" for no-exec notify petitions.
 type PendingRecord struct {
-	Argv      []string          `json:"argv"`
-	UID       uint32            `json:"uid"`
-	AsUID     uint32            `json:"as_uid,omitempty"`
-	Cwd       string            `json:"cwd"`
-	Expires   int64             `json:"expires"`
-	Env       map[string]string `json:"env,omitempty"`
-	ChatID    string            `json:"chat_id,omitempty"`
-	MsgID     int64             `json:"message_id,omitempty"`
-	Step      string            `json:"step,omitempty"`
-	ConfirmOf string            `json:"confirm_of,omitempty"`
-	Preview   *PreviewRecord    `json:"preview,omitempty"`
-	AuthURL   string            `json:"auth_url,omitempty"`
-	Kind      string            `json:"kind,omitempty"`
-	Link      string            `json:"link,omitempty"`
-	Summary   string            `json:"summary,omitempty"`
-	Git       *GitPin           `json:"git,omitempty"`
-	FD        *FDPin            `json:"fd,omitempty"`
-	Seal      *SealPin          `json:"seal,omitempty"`
-	Suspend   *SuspendPin       `json:"suspend,omitempty"`
+	Argv             []string          `json:"argv"`
+	UID              uint32            `json:"uid"`
+	AsUID            uint32            `json:"as_uid,omitempty"`
+	Cwd              string            `json:"cwd"`
+	Expires          int64             `json:"expires"`
+	Env              map[string]string `json:"env,omitempty"`
+	ChatID           string            `json:"chat_id,omitempty"`
+	MsgID            int64             `json:"message_id,omitempty"`
+	Step             string            `json:"step,omitempty"`
+	ConfirmOf        string            `json:"confirm_of,omitempty"`
+	Preview          *PreviewRecord    `json:"preview,omitempty"`
+	AuthURL          string            `json:"auth_url,omitempty"`
+	Kind             string            `json:"kind,omitempty"`
+	Link             string            `json:"link,omitempty"`
+	Summary          string            `json:"summary,omitempty"`
+	Question         string            `json:"question,omitempty"`
+	Options          []string          `json:"options,omitempty"`
+	MultiSelect      bool              `json:"multi_select,omitempty"`
+	AllowWriteIn     bool              `json:"allow_write_in,omitempty"`
+	RecommendedIndex int               `json:"recommended_index,omitempty"`
+	Selection        string            `json:"selection,omitempty"`
+	SelectionIdx     int               `json:"selection_idx,omitempty"`
+	Git              *GitPin           `json:"git,omitempty"`
+	FD               *FDPin            `json:"fd,omitempty"`
+	Seal             *SealPin          `json:"seal,omitempty"`
+	Suspend          *SuspendPin       `json:"suspend,omitempty"`
 }
 
 // AckRecord is written once, atomically (O_EXCL): first ack wins.
@@ -423,6 +473,17 @@ type VerdictRecord struct {
 	UnixNano int64  `json:"unix_nano"`
 }
 
+// SelectionRecord is written once, atomically (O_EXCL): the first ask
+// option pick wins. Selection is the verbatim option text chosen and
+// SelectionIdx its index in the petition's option list; By names the
+// operator channel (e.g. "telegram:<id>").
+type SelectionRecord struct {
+	Selection    string `json:"selection"`
+	SelectionIdx int    `json:"selection_idx"`
+	By           string `json:"by"`
+	UnixNano     int64  `json:"unix_nano"`
+}
+
 // responseTypes maps envelope keys to their response types. It lives
 // here, next to the structs, so the daemon derives everything below
 // via reflection instead of mirroring shapes by hand.
@@ -430,6 +491,7 @@ var responseTypes = map[string]reflect.Type{
 	"run":                 reflect.TypeFor[RunResult](),
 	"verdict":             reflect.TypeFor[VerdictAck](),
 	"notify":              reflect.TypeFor[RunResult](),
+	"ask":                 reflect.TypeFor[AskResult](),
 	"ack":                 reflect.TypeFor[AckResponse](),
 	"list":                reflect.TypeFor[PendingList](),
 	"recent":              reflect.TypeFor[RecentList](),
@@ -523,21 +585,25 @@ func Describe(op string) ([]OpInfo, bool) {
 }
 
 type AuditEvent struct {
-	Ev         string   `json:"ev"` // request | verdict | allow | exec | confirm | confirmation_timeout | client_aborted | notify | ack | git_drift | fd_drift | seal_drift | suspend | resume
-	UID        uint32   `json:"uid,omitempty"`
-	By         string   `json:"by,omitempty"`
-	Argv       []string `json:"argv,omitempty"`
-	Cwd        string   `json:"cwd,omitempty"`
-	Tier       string   `json:"tier,omitempty"`
-	Decision   string   `json:"decision,omitempty"`
-	RID        string   `json:"rid,omitempty"`
-	Step       string   `json:"step,omitempty"`
-	ConfirmOf  string   `json:"confirm_of,omitempty"`
-	AsUID      uint32   `json:"as_uid,omitempty"`
-	Dry        bool     `json:"dry,omitempty"`
-	Exit       int      `json:"exit,omitempty"`
-	EnvDropped []string `json:"env_dropped,omitempty"`
-	TS         string   `json:"ts"`
-	Link       string   `json:"link,omitempty"`
-	Summary    string   `json:"summary,omitempty"`
+	Ev           string   `json:"ev"` // request | verdict | allow | exec | confirm | confirmation_timeout | client_aborted | notify | ack | git_drift | fd_drift | seal_drift | suspend | resume
+	UID          uint32   `json:"uid,omitempty"`
+	By           string   `json:"by,omitempty"`
+	Argv         []string `json:"argv,omitempty"`
+	Cwd          string   `json:"cwd,omitempty"`
+	Tier         string   `json:"tier,omitempty"`
+	Decision     string   `json:"decision,omitempty"`
+	RID          string   `json:"rid,omitempty"`
+	Step         string   `json:"step,omitempty"`
+	ConfirmOf    string   `json:"confirm_of,omitempty"`
+	AsUID        uint32   `json:"as_uid,omitempty"`
+	Dry          bool     `json:"dry,omitempty"`
+	Exit         int      `json:"exit,omitempty"`
+	EnvDropped   []string `json:"env_dropped,omitempty"`
+	TS           string   `json:"ts"`
+	Link         string   `json:"link,omitempty"`
+	Summary      string   `json:"summary,omitempty"`
+	Question     string   `json:"question,omitempty"`
+	Options      []string `json:"options,omitempty"`
+	Selection    string   `json:"selection,omitempty"`
+	SelectionIdx int      `json:"selection_idx,omitempty"`
 }
