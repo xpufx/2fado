@@ -23,6 +23,12 @@ coverage.out
 *.exe
 *.log
 
+# Go build cache redirected into the tree when ~/.cache is read-only
+# (sandboxed agents); never commit it.
+.gocache/
+# Ad-hoc scratch dirs used for isolated daemon/test runs.
+.testrun/
+
 # Local secrets. Never commit.
 .env*
 *.pem
