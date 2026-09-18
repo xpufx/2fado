@@ -28,10 +28,16 @@ Third parties should mirror this surface for operator parity. Producer-side ops 
 
 | Var(s) | Use | Default |
 |---|---|---|
-| `TWOFADO_SOCKET` → `FADO_SOCKET` | Daemon socket path (CLI candidate chain) | `/tmp/2fado.sock` |
-| `TWOFADO_CONF` → `FADO_CONF` → `2FADO_CONF` | Daemon config path (`daemon` subcommand) | `/etc/2fado/2fado.conf` |
+| `TWOFADO_SOCKET` → `FADO_SOCKET` | explicit daemon socket path | see chain below |
+| `TWOFADO_RUN_DIR` → `FADO_RUN_DIR` | runtime dir for socket + pid file | unset |
+| `TWOFADO_STATE_DIR` → `FADO_STATE_DIR` | daemon state/store dir | `$XDG_STATE_HOME/2fado` |
+| `TWOFADO_PID_FILE` → `FADO_PID_FILE` | explicit daemon pid file | state dir (or run dir) |
+| `TWOFADO_CONF` → `FADO_CONF` → `2FADO_CONF` | daemon config path (`daemon` subcommand) | `/etc/2fado/2fado.conf` |
 
-Note: the frozen socket candidate chain is per-call `socketPath` → `$TWOFADO_SOCKET` → `$FADO_SOCKET` → `/tmp/2fado.sock`. There is no `/run/2fado.sock` candidate.
+Socket candidate chain (shared by daemon and CLI via `config.DefaultSocketPath`):
+`$TWOFADO_SOCKET` → `$FADO_SOCKET` → `$TWOFADO_RUN_DIR/2fado.sock` →
+`$XDG_RUNTIME_DIR/2fado/2fado.sock` → `/tmp/2fado.sock`. A daemon config
+`SOCKET=` entry sits between the env overrides and these defaults.
 
 ## Exit-code conventions (`client.go`)
 

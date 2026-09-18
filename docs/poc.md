@@ -14,6 +14,9 @@ export TWOFADO_CONF=$PWD/etc/2fado.conf.example   # placeholders intact (legacy 
 ./bin/2fado approve <request-id>                 # terminal 2: the "OOB thing"
 ```
 
+Shortcut: `make dev` (repo-local isolated daemon) and the systemd --user
+service are covered in docs/daemon-service.md.
+
 With a real bot token + approver id in the config, terminal 2 becomes
 your phone: tap Approve/Deny inline, daemon long-polls `getUpdates`
 (outbound only, no open ports) and burns the one-time token.

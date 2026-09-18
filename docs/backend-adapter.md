@@ -8,7 +8,7 @@ This page defines what a third-party backend implements so a third-party consume
 
 - Unix socket, JSON-lines: one JSON object + `\n` per request, one JSON line back, fresh connection per call.
 - Socket timeout 2000ms per candidate (`telegram_info` uses 8000ms); every RPC wrapped in a 5s-timeout, max-4-inflight guard.
-- Frozen socket candidate order: per-call `socketPath` → `$TWOFADO_SOCKET` → `$FADO_SOCKET` → `/tmp/2fado.sock`. There is no `/run/2fado.sock` candidate.
+- Socket candidate order: per-call `socketPath` → `$TWOFADO_SOCKET` → `$FADO_SOCKET` → `$TWOFADO_RUN_DIR/2fado.sock` → `$XDG_RUNTIME_DIR/2fado/2fado.sock` → `/tmp/2fado.sock`. The daemon's canonical socket is `$XDG_RUNTIME_DIR/2fado/2fado.sock` (see docs/daemon-service.md).
 - Envelope (`protocol.ClientMessage`): exactly one field set. Third-party consumers use 8 of 12 ops (list, verdict, ack, recent, status, telegram_info, telegram_set_config, policy_add_rule — see the op table below); `run`, `notify`, `version`, `help` are CLI-only today (see `docs/backend-cli.md`).
 
 ## Op table (consumer → backend)

@@ -1,3 +1,7 @@
+# SYSTEM (root) unit example for a future privileged layout — NOT the
+# per-user service. The active user unit is etc/2fadod.service (installed by
+# `make service-install` into ~/.config/systemd/user/).
+
 [Unit]
 Description=2fado privileged daemon
 After=network-online.target

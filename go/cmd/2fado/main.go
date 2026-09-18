@@ -152,10 +152,7 @@ func main() {
 	if len(os.Args) < 2 {
 		os.Exit(usage())
 	}
-	sock := config.GetEnvWithFallback("TWOFADO_SOCKET", "FADO_SOCKET")
-	if sock == "" {
-		sock = "/tmp/2fado.sock"
-	}
+	sock := config.DefaultSocketPath()
 	switch os.Args[1] {
 	case "daemon":
 		daemon.SetBuildInfo(Version, GitCommit, BuildTime)

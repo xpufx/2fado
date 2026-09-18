@@ -1,0 +1,28 @@
+# systemd --user template for isolated 2fadod instances (worktrees/branches).
+#
+# Run a branch-specific instance WITHOUT touching the primary user daemon:
+#   systemctl --user start 2fadod@worktree.service
+#   TWOFADO_SOCKET=$XDG_RUNTIME_DIR/2fado/worktree.sock ./bin/2fado socket-version
+#
+# Each instance (%i) gets its own socket, state dir, and config file:
+#   socket: $XDG_RUNTIME_DIR/2fado/<instance>.sock
+#   state:  $XDG_STATE_HOME/2fado/<instance>
+#   conf:   ~/.config/2fado/<instance>.conf
+# Drop a per-instance conf at that path (or rely on the placeholder/stdout
+# pager defaults) before starting.
+
+[Unit]
+Description=2fado out-of-band approval daemon instance %i (user)
+Documentation=https://forge.mrs.uppidi.com/xpufx-org/2fado
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/2fado daemon
+Environment=TWOFADO_SOCKET=%t/2fado/%i.sock
+Environment=TWOFADO_STATE_DIR=%S/2fado/%i
+Environment=TWOFADO_CONF=%h/.config/2fado/%i.conf
+Restart=on-failure
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

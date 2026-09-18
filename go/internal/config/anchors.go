@@ -17,18 +17,44 @@ func DefaultStateDir() string {
 	return filepath.Join(string(filepath.Separator)+"var", "lib", "2fado")
 }
 
+// RunDir returns the 2fado runtime-directory override, or "" when unset.
+// When set it relocates the socket and pid file as a single knob, which is
+// what isolated dev/worktree instances use to avoid touching the primary
+// user daemon (see `make dev` and docs/daemon-service.md). The state
+// directory is independent and governed by TWOFADO_STATE_DIR.
+func RunDir() string {
+	return GetEnvWithFallback("TWOFADO_RUN_DIR", "FADO_RUN_DIR")
+}
+
+// DefaultSocketPath resolves the daemon socket:
+//
+//  1. TWOFADO_SOCKET / FADO_SOCKET (explicit full path)
+//  2. TWOFADO_RUN_DIR/<2fado.sock> (runtime-dir override)
+//  3. $XDG_RUNTIME_DIR/2fado/2fado.sock (XDG runtime convention)
+//  4. /tmp/2fado.sock (graceful fallback when no XDG runtime dir exists)
+//
+// The CLI client resolves through the same function so client and daemon
+// agree on the canonical socket without duplicating the candidate chain.
 func DefaultSocketPath() string {
-	if d := os.Getenv("XDG_RUNTIME_DIR"); d != "" {
+	if p := GetEnvWithFallback("TWOFADO_SOCKET", "FADO_SOCKET"); p != "" {
+		return p
+	}
+	if d := RunDir(); d != "" {
 		return filepath.Join(d, "2fado.sock")
 	}
-	home, _ := os.UserHomeDir()
-	if home != "" {
-		return filepath.Join(home, ".local", "state", "2fado", "2fado.sock")
+	if d := os.Getenv("XDG_RUNTIME_DIR"); d != "" {
+		return filepath.Join(d, "2fado", "2fado.sock")
 	}
-	return filepath.Join(string(filepath.Separator)+"var", "lib", "2fado", "2fado.sock")
+	return filepath.Join(string(filepath.Separator)+"tmp", "2fado.sock")
 }
 
 func DefaultPidFile(stateDir string) string {
+	if p := GetEnvWithFallback("TWOFADO_PID_FILE", "FADO_PID_FILE"); p != "" {
+		return p
+	}
+	if d := RunDir(); d != "" {
+		return filepath.Join(d, "2fado.pid")
+	}
 	if stateDir == "" {
 		stateDir = DefaultStateDir()
 	}
