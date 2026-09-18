@@ -451,6 +451,7 @@ type PendingRecord struct {
 	MultiSelect      bool              `json:"multi_select,omitempty"`
 	AllowWriteIn     bool              `json:"allow_write_in,omitempty"`
 	RecommendedIndex int               `json:"recommended_index,omitempty"`
+	PageLines        []string          `json:"page_lines,omitempty"`
 	Selection        string            `json:"selection,omitempty"`
 	SelectionIdx     int               `json:"selection_idx,omitempty"`
 	Git              *GitPin           `json:"git,omitempty"`

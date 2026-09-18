@@ -157,6 +157,51 @@ func Who(uid uint32) string {
 // cannot push the request id or buttons out of view.
 const maxCommandRunes = 1500
 
+// ExpandableMinRunes is the visible-text length above which a long body
+// is collapsed behind <blockquote expandable> so cards stay compact by
+// default with one-tap expansion. Bot API 7.0+ renders it; older clients
+// degrade to a plain blockquote.
+const ExpandableMinRunes = 280
+
+// Expandable wraps an ALREADY-ESCAPED HTML body in a collapsible
+// blockquote. The caller owns escaping: this helper only adds markup and
+// must never be handed raw user/command text. Empty bodies pass through
+// so no empty quote is emitted.
+func Expandable(body string) string {
+	if body == "" {
+		return ""
+	}
+	return "<blockquote expandable>" + body + "</blockquote>"
+}
+
+// Spoiler wraps an ALREADY-ESCAPED HTML body in a tap-to-reveal spoiler.
+// It is screen privacy only — Telegram still stores the plaintext and any
+// client shows it after a tap — so it must never be mistaken for
+// redaction. The caller owns escaping.
+func Spoiler(body string) string {
+	if body == "" {
+		return ""
+	}
+	return "<tg-spoiler>" + body + "</tg-spoiler>"
+}
+
+// expandablePre renders already-escaped text as a code block, collapsing
+// it behind an expandable quote when the text is long enough to matter.
+func expandablePre(escaped string) string {
+	block := "<pre><code>" + escaped + "</code></pre>"
+	if len([]rune(escaped)) <= ExpandableMinRunes {
+		return block
+	}
+	return Expandable(block)
+}
+
+// spillID renders an already-escaped request id as a spoiler-wrapped code
+// token: the id is an opaque capability-shaped handle that need not be
+// readable to a shoulder-surfer.
+func spillID(rid string) string {
+	return Spoiler("<code>" + rid + "</code>")
+}
+
 // Card renders the approval request as HTML (parse_mode HTML). All
 // untrusted fields are html-escaped so embedded backticks, tags, or
 // entities cannot break out of the code block or spoof card layout.
@@ -169,8 +214,8 @@ func Card(host string, argv []string, uid uint32, cwd, rid string, expiresIn int
 	if r := []rune(cmd); len(r) > maxCommandRunes {
 		cmd = string(r[:maxCommandRunes]) + "…[truncated]"
 	}
-	return fmt.Sprintf("%s\n🖥️ host: <code>%s</code>\n👤 caller: <code>%s</code>\n🔑 will run as: <code>%s</code>\n📁 cwd: <code>%s</code>\n⌨️ command:\n<pre><code>%s</code></pre>\n🕒 expires in %ds · request <code>%s</code>",
-		head, html.EscapeString(host), html.EscapeString(Who(uid)), html.EscapeString(Who(asUID)), html.EscapeString(cwd), html.EscapeString(cmd), expiresIn, html.EscapeString(rid))
+	return fmt.Sprintf("%s\n🖥️ host: <code>%s</code>\n👤 caller: <code>%s</code>\n🔑 will run as: <code>%s</code>\n📁 cwd: <code>%s</code>\n⌨️ command:\n%s\n🕒 expires in %ds · request %s",
+		head, html.EscapeString(host), html.EscapeString(Who(uid)), html.EscapeString(Who(asUID)), html.EscapeString(cwd), expandablePre(html.EscapeString(cmd)), expiresIn, spillID(html.EscapeString(rid)))
 }
 
 // resolutionHead renders the card header, naming the decision source on
@@ -252,8 +297,8 @@ func NotifyCard(host, link, summary, rid string, expiresIn int64, acked bool, ac
 	if acked {
 		head = fmt.Sprintf("✅ <b>Acknowledged via %s</b>", html.EscapeString(sourceLabel(ackBy)))
 	}
-	return fmt.Sprintf("%s\n🖥️ host: <code>%s</code>\n🔗 link: %s\n📝 summary:\n<pre><code>%s</code></pre>\n🕒 expires in %ds · notify <code>%s</code>",
-		head, html.EscapeString(host), html.EscapeString(link), html.EscapeString(sum), expiresIn, html.EscapeString(rid))
+	return fmt.Sprintf("%s\n🖥️ host: <code>%s</code>\n🔗 link: %s\n📝 summary:\n%s\n🕒 expires in %ds · notify %s",
+		head, html.EscapeString(host), html.EscapeString(link), expandablePre(html.EscapeString(sum)), expiresIn, spillID(html.EscapeString(rid)))
 }
 
 // NotifyButtons builds the inline keyboard for a notify card: an Ack
@@ -287,15 +332,15 @@ func AskCard(host, question, link, rid string, expiresIn int64, chosen bool, sel
 	if chosen {
 		head = fmt.Sprintf("✅ <b>Chosen: %s</b>", html.EscapeString(selection))
 	}
-	card := fmt.Sprintf("%s\n🖥️ host: <code>%s</code>\n📝 question:\n<pre><code>%s</code></pre>",
-		head, html.EscapeString(host), html.EscapeString(q))
+	card := fmt.Sprintf("%s\n🖥️ host: <code>%s</code>\n📝 question:\n%s",
+		head, html.EscapeString(host), expandablePre(html.EscapeString(q)))
 	if link != "" {
 		card += "\n🔗 link: " + html.EscapeString(link)
 	}
 	if chosen {
 		card += fmt.Sprintf("\n👤 chosen by: <code>%s</code>", html.EscapeString(sourceLabel(by)))
 	}
-	return fmt.Sprintf("%s\n🕒 expires in %ds · ask <code>%s</code>", card, expiresIn, html.EscapeString(rid))
+	return fmt.Sprintf("%s\n🕒 expires in %ds · ask %s", card, expiresIn, spillID(html.EscapeString(rid)))
 }
 
 // AskButtons builds the inline keyboard for an ask card: one callback
@@ -318,6 +363,78 @@ func AskButtons(rid string, options []string, recommended int) string {
 	}
 	kb, _ := json.Marshal(Keyboard{Buttons: rows})
 	return string(kb)
+}
+
+// PagedPageSize bounds how many list lines ride on a single card page.
+const PagedPageSize = 5
+
+// ListPages returns the page count for n lines: always a whole number of
+// pages and never less than one, so empty and single-page lists both
+// render exactly one (buttonless) page.
+func ListPages(n int) int {
+	if n <= 0 {
+		return 1
+	}
+	return (n + PagedPageSize - 1) / PagedPageSize
+}
+
+// PageSlice returns the lines on 0-based page. Out-of-range pages yield
+// nil; callers should clamp against ListPages first.
+func PageSlice(lines []string, page int) []string {
+	if page < 0 {
+		return nil
+	}
+	start := page * PagedPageSize
+	if start >= len(lines) {
+		return nil
+	}
+	end := start + PagedPageSize
+	if end > len(lines) {
+		end = len(lines)
+	}
+	return lines[start:end]
+}
+
+// PagedButtons builds the pager row for page (0-based) of pages. Prev/Next
+// are hidden at the boundaries and single-page or empty lists get no
+// buttons at all. The centre label is a no-op so the current position is
+// always visible.
+func PagedButtons(rid string, page, pages int) string {
+	if pages <= 1 {
+		return EmptyButtons()
+	}
+	if page < 0 {
+		page = 0
+	}
+	if page >= pages {
+		page = pages - 1
+	}
+	nav := make([]InlineButton, 0, 3)
+	if page > 0 {
+		nav = append(nav, InlineButton{Text: "◀️ Prev", Data: "page:" + rid + ":" + strconv.Itoa(page-1)})
+	}
+	nav = append(nav, InlineButton{Text: fmt.Sprintf("Page %d/%d", page+1, pages), Data: "noop"})
+	if page+1 < pages {
+		nav = append(nav, InlineButton{Text: "Next ▶️", Data: "page:" + rid + ":" + strconv.Itoa(page+1)})
+	}
+	kb, _ := json.Marshal(Keyboard{Buttons: [][]InlineButton{nav}})
+	return string(kb)
+}
+
+// PagedCard renders one page of a long list. host/title/lines are
+// untrusted and escaped; an empty page renders an explicit marker so the
+// operator never sees a blank card. Pair with PagedButtons.
+func PagedCard(host, title, rid string, lines []string, page, pages int) string {
+	body := "No items."
+	if len(lines) > 0 {
+		esc := make([]string, len(lines))
+		for i, l := range lines {
+			esc[i] = html.EscapeString(l)
+		}
+		body = "<pre><code>" + strings.Join(esc, "\n") + "</code></pre>"
+	}
+	return fmt.Sprintf("📄 <b>%s</b>\n🖥️ host: <code>%s</code>\n%s\n📑 page %d/%d · list %s",
+		html.EscapeString(title), html.EscapeString(host), body, page+1, pages, spillID(html.EscapeString(rid)))
 }
 
 // Send posts the card, returns the message id for later rewriting.
@@ -426,12 +543,15 @@ func (c Client) Poll(ctx context.Context, offset int64, approvers map[string]boo
 		for _, u := range up.Result {
 			offset = u.ID + 1
 			data := u.Callback.Data
-			kind, rid, idx, ok := splitVerdict(data)
-			if !ok {
-				continue
-			}
 			by := strconv.FormatInt(u.Callback.From.ID, 10)
 			if !approvers[by] {
+				continue
+			}
+			kind, rid, idx, ok := splitVerdict(data)
+			if !ok {
+				if data == "noop" {
+					c.answer(u.Callback.ID, "")
+				}
 				continue
 			}
 			select {
@@ -439,13 +559,16 @@ func (c Client) Poll(ctx context.Context, offset int64, approvers map[string]boo
 			case <-ctx.Done():
 				return
 			}
-			if kind == "approve" {
+			switch kind {
+			case "approve":
 				c.answer(u.Callback.ID, "approved — executing")
-			} else if kind == "ack" {
+			case "ack":
 				c.answer(u.Callback.ID, "acknowledged")
-			} else if kind == "ask" {
+			case "ask":
 				c.answer(u.Callback.ID, "answer recorded")
-			} else {
+			case "page":
+				c.answer(u.Callback.ID, fmt.Sprintf("page %d", idx+1))
+			default:
 				c.answer(u.Callback.ID, "denied")
 			}
 		}
@@ -465,6 +588,18 @@ func splitVerdict(data string) (kind, rid string, idx int, ok bool) {
 			return "", "", 0, false
 		}
 		return "ask", rest[:i], n, true
+	}
+	if strings.HasPrefix(data, "page:") {
+		rest := strings.TrimPrefix(data, "page:")
+		i := strings.LastIndex(rest, ":")
+		if i <= 0 || i == len(rest)-1 {
+			return "", "", 0, false
+		}
+		n, err := strconv.Atoi(rest[i+1:])
+		if err != nil || n < 0 {
+			return "", "", 0, false
+		}
+		return "page", rest[:i], n, true
 	}
 	if strings.HasPrefix(data, "approve:") {
 		return "approve", strings.TrimPrefix(data, "approve:"), 0, true

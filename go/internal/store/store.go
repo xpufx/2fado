@@ -92,6 +92,19 @@ func (s Store) SetAuthURL(rid, authURL string) {
 	_ = s.Save(rec, rid)
 }
 
+// SetPageList records the title and backing lines of a paged Telegram
+// list card so "page:<rid>:<n>" callbacks can re-render the card in
+// place without a separate cursor. Paging is non-binding and idempotent.
+func (s Store) SetPageList(rid, title string, lines []string) {
+	rec, err := s.Load(rid)
+	if err != nil {
+		return
+	}
+	rec.Summary = title
+	rec.PageLines = lines
+	_ = s.Save(rec, rid)
+}
+
 // Consume writes the verdict exactly once (O_EXCL): one verdict wins.
 func (s Store) Consume(rid, decision, by string) bool {
 	data, err := json.Marshal(protocol.VerdictRecord{
