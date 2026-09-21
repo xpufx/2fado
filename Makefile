@@ -2,7 +2,9 @@ SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
-LDFLAGS = -X main.GitCommit=$(GIT_COMMIT) -X main.BuildTime=$(BUILD_TIME) -X main.Version=0.1.0-dev
+VERSION ?= 0.1.0-dev
+LDFLAGS = -X main.GitCommit=$(GIT_COMMIT) -X main.BuildTime=$(BUILD_TIME) -X main.Version=$(VERSION)
+DIST_DIR ?= $(CURDIR)/dist
 
 # ---------------------------------------------------------------------------
 # Runtime anchors. These mirror go/internal/config/anchors.go so `make` and
@@ -43,7 +45,7 @@ DEV_SOCKET ?= $(DEV_RUN_DIR)/2fado.sock
 DEV_PID_FILE ?= $(DEV_RUN_DIR)/2fado.pid
 DEV_LOG_FILE ?= $(DEV_ROOT)/2fadod.log
 
-.PHONY: build restart-daemon restart-daemon-fallback stop-daemon stop-daemon-fallback \
+.PHONY: build test cross-build dist clean restart-daemon restart-daemon-fallback stop-daemon stop-daemon-fallback \
 	service-install dev dev-stop status vet fmt reload ready reload-plugin \
 	verify-escalation-excluded test-escalation test
 
@@ -208,3 +210,16 @@ test:
 
 fmt:
 	cd go && gofmt -w .
+
+test:
+	cd go && go test ./...
+
+cross-build:
+	@VERSION="$(VERSION)" DIST_DIR="$(DIST_DIR)" ./scripts/build-cross.sh
+
+dist:
+	@VERSION="$(VERSION)" DIST_DIR="$(DIST_DIR)" ./scripts/build-cross.sh --package
+
+clean:
+	rm -rf bin/2fado $(DEV_ROOT) $(DIST_DIR)
+

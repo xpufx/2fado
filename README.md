@@ -37,6 +37,8 @@ docs/daemon-service.md  systemd --user service + isolated dev/worktree workflow
 docs/backend-cli.md     CLI usage reference
 docs/backend-api.md     daemon socket API reference for third-party consumers
 docs/backend-adapter.md third-party backend contract (design)
+docs/build-and-release.md
+                        cross-platform build runbook & release verification
 docs/toctou-suspended-execution.md
                         design decision: suspended execution vs TOCTOU race
 ```
@@ -61,6 +63,19 @@ docs/daemon-service.md; legacy FADO_* also supported.)
 
 Paste a bot token + your Telegram id into the config and terminal 2
 becomes your phone (outbound long-poll, no open ports).
+
+## Cross-platform builds & packaging
+
+`2fado` is built with Go stdlib only and supports `linux/amd64`, `linux/arm64`,
+`darwin/amd64`, and `darwin/arm64`.
+
+```sh
+make cross-build        # cross-compile all binaries into dist/
+make dist               # bundle tarballs + generate SHA256SUMS
+```
+
+See [docs/build-and-release.md](docs/build-and-release.md) for full build instructions,
+single-platform compilation (e.g. Apple Silicon macOS), and release verification.
 
 ## Design in one breath
 

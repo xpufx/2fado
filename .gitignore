@@ -7,6 +7,7 @@ etc/*.conf
 # Built binaries stay out; `make build`.
 bin/*
 !bin/.gitignore
+dist/
 daemon.log
 
 # Local-only tooling state.
