@@ -1,15 +1,15 @@
 # Backend API — third-party consumer RPC reference (`approval.*`)
 
-Status: draft. This describes the contract a third-party consumer implements against the daemon socket API; op inventory source of truth is `go/internal/protocol/protocol.go` (`ClientMessage`, 12 ops: run, verdict, notify, ack, list, recent, status, telegram_info, telegram_set_config, policy_add_rule, version, help).
+Status: draft. This describes the contract a third-party consumer implements against the daemon socket API; op inventory source of truth is `go/internal/protocol/protocol.go` (`ClientMessage`, 13 ops: run, verdict, notify, ask, ack, list, recent, status, telegram_info, telegram_set_config, policy_add_rule, version, help).
 
 All consumer RPCs are validated on both sides. Every input carries optional `socketPath` (future `backendRef` alias — see `docs/backend-adapter.md`).
 
 ## `approval.list` — pending queue
 
 - Input: `{socketPath?}`.
-- Output: `{items: [{id, argv, host, caller, cwd, asUid, expiresIn, step: initial|confirm (default initial), confirmOf?, kind?, link?, summary?, acked?, ackBy?, authUrl?, preview?}]}`.
+- Output: `{items: [{id, argv, host, caller, cwd, asUid, expiresIn, step: initial|confirm (default initial), confirmOf?, kind?, link?, summary?, question?, options?, selection?, selectionIdx?, acked?, ackBy?, authUrl?, preview?}]}`.
 - Server: sends `{list:{}}`, camelCases daemon `PendingList`, sets `host=os.hostname()`, `caller=String(uid)`. Fail-soft: `{items:[]}` + `log.warn`.
-- Client: polls every 3s (`POLL_MS`); toast per new id; `kind==="notify"` renders Ack-only cards (no argv); `step==="confirm"` renders danger styling + `confirmOf` dedup against Recent.
+- Client: polls every 3s (`POLL_MS`); toast per new id; `kind==="notify"` renders Ack-only cards (no argv); `kind==="ask"` renders interactive choice cards with options; `step==="confirm"` renders danger styling + `confirmOf` dedup against Recent.
 
 ## `approval.verdict` — approve / deny
 
@@ -27,14 +27,14 @@ All consumer RPCs are validated on both sides. Every input carries optional `soc
 ## `approval.recent` — history
 
 - Input: `{socketPath?, limit? (int, 1–50, default 10)}`.
-- Output: `{items: [{id, argv, cwd, asUid, decision, by, exit, output, step?, confirmOf?, kind?, link?, summary?, acked?, ackBy?, authUrl?}]}`.
+- Output: `{items: [{id, argv, cwd, asUid, decision, by, exit, output, step?, confirmOf?, kind?, link?, summary?, question?, options?, selection?, selectionIdx?, acked?, ackBy?, authUrl?}]}`.
 - Server: sends `{recent:{limit}}`. Fail-soft: `{items:[]}`.
 - Client: polls every 5s with limit 10 (`RECENT_POLL_MS`, `RECENT_LIMIT`); History tab hides if backend lacks this capability.
 
 ## `approval.status` — execution outcome
 
 - Input: `{id (min 1), socketPath?}`.
-- Output: `{id, status, argv?, cwd?, asUid?, expiresIn?, decision?, by?, exit, output?, step?, confirmOf?, kind?, link?, summary?, acked?, ackBy?, ackAt?, authUrl?}`, where `status ∈ not_found|pending|confirming|running|completed|denied|timeout|client_aborted|confirmation_timeout|acked`.
+- Output: `{id, status, argv?, cwd?, asUid?, expiresIn?, decision?, by?, exit, output?, step?, confirmOf?, kind?, link?, summary?, question?, options?, selection?, selectionIdx?, acked?, ackBy?, ackAt?, authUrl?}`, where `status ∈ not_found|pending|confirming|running|completed|denied|timeout|client_aborted|confirmation_timeout|acked|selected`.
 - Server: sends `{status:{id}}`; unknown daemon status → `not_found`; missing id → `{id:"",status:"not_found",exit:-1}`. Fail-soft: `{id,status:"not_found",exit:-1}`.
 - Client: after approve, polls ~350ms × 60 for `confirming→completed` transitions; without this op, tracking degrades to fire-and-forget + recent poll.
 

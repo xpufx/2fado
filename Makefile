@@ -45,7 +45,7 @@ DEV_LOG_FILE ?= $(DEV_ROOT)/2fadod.log
 
 .PHONY: build restart-daemon restart-daemon-fallback stop-daemon stop-daemon-fallback \
 	service-install dev dev-stop status vet fmt reload ready reload-plugin \
-	verify-escalation-excluded test-escalation
+	verify-escalation-excluded test-escalation test
 
 build:
 	cd go && go build -ldflags "$(LDFLAGS)" -o ../bin/2fado ./cmd/2fado
@@ -202,6 +202,9 @@ verify-escalation-excluded:
 
 test-escalation:
 	cd go && go test -tags escalation ./...
+
+test:
+	cd go && go test ./...
 
 fmt:
 	cd go && gofmt -w .
