@@ -15,6 +15,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"2fado/internal/client"
@@ -30,7 +31,7 @@ var (
 )
 
 func usage() int {
-	fmt.Println("usage: 2fado daemon | 2fado run -- <argv...> | 2fado approve|deny <id> | 2fado notify --link <url> --summary <text> [--ttl <dur>] | 2fado ask --question <q> --option <o> --option <o> [--link <url>] [--ttl <dur>] | 2fado ack <id> | 2fado status <id> | 2fado list | 2fado recent [--limit N] | 2fado version")
+	fmt.Println("usage: 2fado daemon | 2fado run -- <argv...> | 2fado approve|deny <id> | 2fado cancel <id> [--reason <text>] | 2fado notify --link <url> --summary <text> [--ttl <dur>] | 2fado ask --question <q> --option <o> --option <o> [--link <url>] [--ttl <dur>] | 2fado ack <id> | 2fado status <id> | 2fado list | 2fado recent [--limit N] | 2fado version")
 	return 2
 }
 
@@ -148,6 +149,37 @@ func askCmd(sock string, args []string) int {
 	return client.Ask(sock, question, options, link, ttlSeconds)
 }
 
+// cancelCmd parses: 2fado cancel <id> [--reason <text>].
+func cancelCmd(sock string, args []string) int {
+	if len(args) == 0 {
+		return usage()
+	}
+	id := ""
+	reason := ""
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--reason":
+			if i+1 >= len(args) {
+				return usage()
+			}
+			i++
+			reason = args[i]
+		default:
+			if strings.HasPrefix(args[i], "-") {
+				return usage()
+			}
+			if id != "" {
+				return usage()
+			}
+			id = args[i]
+		}
+	}
+	if id == "" {
+		return usage()
+	}
+	return client.Cancel(sock, id, reason)
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		os.Exit(usage())
@@ -193,6 +225,8 @@ func main() {
 			os.Exit(usage())
 		}
 		os.Exit(client.Verdict(sock, os.Args[1], os.Args[2]))
+	case "cancel":
+		os.Exit(cancelCmd(sock, os.Args[2:]))
 	case "notify":
 		os.Exit(notifyCmd(sock, os.Args[2:]))
 	case "ask":

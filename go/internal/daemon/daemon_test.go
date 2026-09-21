@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"2fado/internal/client"
 	"2fado/internal/config"
 	"2fado/internal/protocol"
 	"2fado/internal/service"
@@ -230,5 +231,116 @@ func TestDaemonAskSocketRoundTrip(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("ask socket call did not return after selection")
+	}
+}
+
+// TestDaemonCancelSocketRoundTrip exercises the cancel op end to end over the
+// unix socket for pending exec petitions and ask petitions.
+func TestDaemonCancelSocketRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	sockPath := filepath.Join(tmpDir, "cancel.sock")
+	t.Setenv("TWOFADO_USER_CONFIG", filepath.Join(tmpDir, "config.json"))
+
+	cfg := config.Conf{
+		Socket:   sockPath,
+		StateDir: tmpDir,
+		Timeout:  5,
+		Policy:   filepath.Join(tmpDir, "policy.json"),
+	}
+	svc := service.New(cfg)
+	go func() {
+		_ = Serve(svc)
+	}()
+	for i := 0; i < 50; i++ {
+		if conn, err := net.Dial("unix", sockPath); err == nil {
+			conn.Close()
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	sendAndRecv := func(req string) []byte {
+		c, err := net.Dial("unix", sockPath)
+		if err != nil {
+			t.Fatalf("dial failed: %v", err)
+		}
+		defer c.Close()
+		if _, err := c.Write([]byte(req + "\n")); err != nil {
+			t.Fatalf("write failed: %v", err)
+		}
+		line, err := bufio.NewReader(c).ReadBytes('\n')
+		if err != nil {
+			t.Fatalf("read failed: %v", err)
+		}
+		return line
+	}
+
+	// 1. Submit an ask request asynchronously
+	type reply struct {
+		raw []byte
+		err error
+	}
+	got := make(chan reply, 1)
+	go func() {
+		c, err := net.Dial("unix", sockPath)
+		if err != nil {
+			got <- reply{err: err}
+			return
+		}
+		defer c.Close()
+		req := `{"ask":{"question":"cancel me","options":["yes","no"],"ttl_seconds":30}}`
+		if _, err := c.Write([]byte(req + "\n")); err != nil {
+			got <- reply{err: err}
+			return
+		}
+		line, err := bufio.NewReader(c).ReadBytes('\n')
+		got <- reply{raw: line, err: err}
+	}()
+
+	rid := ""
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && rid == "" {
+		if items := svc.List().Items; len(items) == 1 && items[0].Kind == "ask" {
+			rid = items[0].ID
+		} else {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if rid == "" {
+		t.Fatal("ask petition never appeared over the socket")
+	}
+
+	// 2. Send cancel request over socket
+	cancelReq := fmt.Sprintf(`{"cancel":{"id":"%s","reason":"user aborted","by":"test"}}`, rid)
+	cancelBytes := sendAndRecv(cancelReq)
+	var cancelRes protocol.CancelResponse
+	if err := json.Unmarshal(cancelBytes, &cancelRes); err != nil {
+		t.Fatalf("unmarshal cancel response: %v (%s)", err, cancelBytes)
+	}
+	if !cancelRes.Cancelled {
+		t.Fatalf("expected cancel success, got %+v", cancelRes)
+	}
+
+	// 3. Verify original ask client unblocked with denied/cancelled
+	select {
+	case r := <-got:
+		if r.err != nil {
+			t.Fatalf("socket read: %v", r.err)
+		}
+		var askRes protocol.AskResult
+		if err := json.Unmarshal(r.raw, &askRes); err != nil {
+			t.Fatalf("unmarshal ask result: %v (%s)", err, r.raw)
+		}
+		if askRes.Status != "denied" || askRes.Reason != "cancelled" {
+			t.Fatalf("ask result = %+v, want denied/cancelled", askRes)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("ask socket call did not unblock after cancel")
+	}
+
+	// 4. Verify client.Cancel helper works over the socket
+	exitCode := client.Cancel(sockPath, rid, "idempotent cancel")
+	if exitCode != 0 {
+		t.Fatalf("client.Cancel returned %d, want 0", exitCode)
 	}
 }

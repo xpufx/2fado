@@ -46,6 +46,7 @@ type ClientMessage struct {
 	Notify            *NotifyRequest            `json:"notify,omitempty"`
 	Ask               *AskRequest               `json:"ask,omitempty"`
 	Ack               *AckSubmit                `json:"ack,omitempty"`
+	Cancel            *CancelRequest            `json:"cancel,omitempty"`
 	List              *ListRequest              `json:"list,omitempty"`
 	Recent            *RecentRequest            `json:"recent,omitempty"`
 	Status            *StatusRequest            `json:"status,omitempty"`
@@ -54,6 +55,22 @@ type ClientMessage struct {
 	PolicyAddRule     *PolicyAddRuleRequest     `json:"policy_add_rule,omitempty"`
 	Version           *VersionRequest           `json:"version,omitempty"`
 	Help              *HelpRequest              `json:"help,omitempty"`
+}
+
+// CancelRequest asks the daemon to cancel a pending, confirming, or
+// waiting ask petition. ID identifies the petition; Reason explains why;
+// By names who requested cancellation (e.g. "cli", "operator", "paseo:<user>").
+type CancelRequest struct {
+	ID     string `json:"id"`
+	Reason string `json:"reason,omitempty"`
+	By     string `json:"by,omitempty"`
+}
+
+// CancelResponse answers a CancelRequest. Cancelled is true if the petition
+// was successfully cancelled or already cancelled idempotently.
+type CancelResponse struct {
+	Cancelled bool   `json:"cancelled"`
+	Error     string `json:"error,omitempty"`
 }
 
 // NotifyRequest asks the daemon to create a no-exec notify-only petition:
@@ -300,7 +317,7 @@ type SuspendPin struct {
 }
 
 // StatusResponse is the answer to a StatusRequest.
-// Status is one of: not_found | pending | confirming | running | completed | denied | timeout | client_aborted | acked.
+// Status is one of: not_found | pending | confirming | running | completed | denied | timeout | client_aborted | acked | cancelled.
 type StatusResponse struct {
 	ID           string         `json:"id"`
 	Status       string         `json:"status"`
@@ -485,6 +502,14 @@ type SelectionRecord struct {
 	UnixNano     int64  `json:"unix_nano"`
 }
 
+// CancelRecord is written once, atomically (O_EXCL): one cancel wins.
+// Persists who cancelled and why.
+type CancelRecord struct {
+	By       string `json:"by"`
+	Reason   string `json:"reason,omitempty"`
+	UnixNano int64  `json:"unix_nano"`
+}
+
 // responseTypes maps envelope keys to their response types. It lives
 // here, next to the structs, so the daemon derives everything below
 // via reflection instead of mirroring shapes by hand.
@@ -496,6 +521,7 @@ var responseTypes = map[string]reflect.Type{
 	"ack":                 reflect.TypeFor[AckResponse](),
 	"list":                reflect.TypeFor[PendingList](),
 	"recent":              reflect.TypeFor[RecentList](),
+	"cancel":              reflect.TypeFor[CancelResponse](),
 	"status":              reflect.TypeFor[StatusResponse](),
 	"telegram_info":       reflect.TypeFor[TelegramInfoResponse](),
 	"telegram_set_config": reflect.TypeFor[TelegramSetConfigResponse](),
@@ -586,7 +612,7 @@ func Describe(op string) ([]OpInfo, bool) {
 }
 
 type AuditEvent struct {
-	Ev           string   `json:"ev"` // request | verdict | allow | exec | confirm | confirmation_timeout | client_aborted | notify | ack | git_drift | fd_drift | seal_drift | suspend | resume
+	Ev           string   `json:"ev"` // request | verdict | allow | exec | confirm | confirmation_timeout | client_aborted | notify | ack | git_drift | fd_drift | seal_drift | suspend | resume | cancelled | cancel_unauthorized
 	UID          uint32   `json:"uid,omitempty"`
 	By           string   `json:"by,omitempty"`
 	Argv         []string `json:"argv,omitempty"`
@@ -607,4 +633,5 @@ type AuditEvent struct {
 	Options      []string `json:"options,omitempty"`
 	Selection    string   `json:"selection,omitempty"`
 	SelectionIdx int      `json:"selection_idx,omitempty"`
+	Reason       string   `json:"reason,omitempty"`
 }

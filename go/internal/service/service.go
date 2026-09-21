@@ -278,6 +278,12 @@ func (s Service) RunWithPeerCancel(req protocol.RunRequest, uid uint32, peerPID 
 			RID: rid, Step: "initial", By: by})
 		return protocol.RunResult{Status: "denied", Reason: "client_aborted"}
 	}
+	if decision == "cancelled" {
+		s.Store.Consume(rid, decision, by)
+		s.closeCard(rid, req, uid, decision, by)
+		s.Store.SaveResult(rid, -1, "cancelled")
+		return protocol.RunResult{Status: "denied", Reason: "cancelled"}
+	}
 	s.Store.Append(protocol.AuditEvent{Ev: "verdict", Argv: req.Argv,
 		RID: rid, Step: "initial", Decision: decision, By: by})
 	if decision != "approve" {
@@ -309,6 +315,11 @@ func (s Service) runDetached(rid string, req protocol.RunRequest, uid uint32, cl
 	if v != nil {
 		decision = v.Decision
 		by = v.By
+	}
+	if decision == "cancelled" {
+		s.closeCard(rid, req, uid, decision, by)
+		s.Store.SaveResult(rid, -1, "cancelled")
+		return
 	}
 	s.Store.Append(protocol.AuditEvent{Ev: "verdict", Argv: req.Argv,
 		RID: rid, Step: "initial", Decision: decision, By: by})
@@ -391,6 +402,13 @@ func (s Service) confirm(rid1 string, req protocol.RunRequest, uid uint32, clean
 			By:        cby,
 		})
 		return protocol.RunResult{Status: "denied", Reason: "client_aborted"}
+	}
+	if decision == "cancelled" {
+		s.Store.Consume(rid, decision, cby)
+		s.closeCard(rid, req, uid, decision, cby)
+		s.Store.SaveResult(rid, -1, "cancelled")
+		s.Store.SaveResult(rid1, -1, "cancelled")
+		return protocol.RunResult{Status: "denied", Reason: "cancelled"}
 	}
 	if decision == "confirmation_timeout" || decision == "timeout" {
 		s.Store.Consume(rid, "timeout", "system")
@@ -707,6 +725,202 @@ func (s Service) Submit(sub protocol.VerdictSubmit, callerUID uint32) protocol.V
 	}
 }
 
+// Cancel terminates a pending, confirming, or waiting ask petition safely
+// and idempotently. Admins (root / daemon UID) or the original petitioning
+// UID may cancel. Suspended process groups are resumed immediately,
+// Telegram/Paseo cards are closed, and the cancellation reason/actor are persisted.
+func (s Service) Cancel(req protocol.CancelRequest, callerUID uint32) protocol.CancelResponse {
+	rid := strings.TrimSpace(req.ID)
+	if rid == "" {
+		return protocol.CancelResponse{Cancelled: false, Error: "missing id"}
+	}
+	rec, err := s.Store.Load(rid)
+	if err != nil {
+		return protocol.CancelResponse{Cancelled: false, Error: "not found"}
+	}
+
+	by := cleanBy(req.By)
+	reason := strings.TrimSpace(req.Reason)
+
+	// Auth check: admin or original requester UID
+	if !isAdminUID(callerUID) && callerUID != rec.UID {
+		s.Store.Append(protocol.AuditEvent{
+			Ev:     "cancel_unauthorized",
+			By:     by,
+			RID:    rid,
+			Reason: reason,
+			UID:    callerUID,
+		})
+		return protocol.CancelResponse{Cancelled: false, Error: "unauthorized"}
+	}
+
+	// Idempotency: if already cancelled, succeed immediately
+	if s.Store.CancelInfo(rid) != nil {
+		return protocol.CancelResponse{Cancelled: true}
+	}
+	if v := s.Store.Verdict(rid); v != nil && v.Decision == "cancelled" {
+		return protocol.CancelResponse{Cancelled: true}
+	}
+	if rec.Step == "confirm" && rec.ConfirmOf != "" {
+		if s.Store.CancelInfo(rec.ConfirmOf) != nil {
+			return protocol.CancelResponse{Cancelled: true}
+		}
+	}
+	if rec.Step == "initial" {
+		if childRID, _ := s.Store.FindConfirmation(rid); childRID != "" {
+			if s.Store.CancelInfo(childRID) != nil {
+				return protocol.CancelResponse{Cancelled: true}
+			}
+		}
+	}
+
+	now := time.Now().Unix()
+
+	// Handle ask petition
+	if rec.Kind == "ask" {
+		if sel := s.Store.SelectionInfo(rid); sel != nil {
+			return protocol.CancelResponse{Cancelled: false, Error: "already decided"}
+		}
+		if rec.Expires <= now {
+			return protocol.CancelResponse{Cancelled: false, Error: "already expired"}
+		}
+		s.Store.Cancel(rid, by, reason)
+		s.closeAskCard(rid, "", by)
+		s.Store.Append(protocol.AuditEvent{
+			Ev:       "cancelled",
+			RID:      rid,
+			Step:     "initial",
+			By:       by,
+			Reason:   reason,
+			UID:      rec.UID,
+			Question: rec.Question,
+		})
+		return protocol.CancelResponse{Cancelled: true}
+	}
+
+	// Handle notify petition
+	if rec.Kind == "notify" {
+		if ack := s.Store.AckInfo(rid); ack != nil {
+			return protocol.CancelResponse{Cancelled: false, Error: "already acknowledged"}
+		}
+		if rec.Expires <= now {
+			return protocol.CancelResponse{Cancelled: false, Error: "already expired"}
+		}
+		s.Store.Cancel(rid, by, reason)
+		s.closeNotifyCard(rid, by)
+		s.Store.Append(protocol.AuditEvent{
+			Ev:      "cancelled",
+			RID:     rid,
+			Step:    "initial",
+			By:      by,
+			Reason:  reason,
+			UID:     rec.UID,
+			Link:    rec.Link,
+			Summary: rec.Summary,
+		})
+		return protocol.CancelResponse{Cancelled: true}
+	}
+
+	// Exec petition (run / confirm)
+	v := s.Store.Verdict(rid)
+	if rec.Step == "confirm" {
+		if v != nil && v.Decision != "cancelled" {
+			return protocol.CancelResponse{Cancelled: false, Error: "already decided"}
+		}
+		if rec.Expires <= now {
+			return protocol.CancelResponse{Cancelled: false, Error: "already expired"}
+		}
+
+		parentRID := rec.ConfirmOf
+		s.Store.Cancel(rid, by, reason)
+		s.Store.Consume(rid, "cancelled", by)
+		s.Store.SaveResult(rid, -1, "cancelled")
+		s.closeCard(rid, protocol.RunRequest{Argv: rec.Argv}, rec.UID, "cancelled", by)
+		s.resumeStored(rid)
+		s.Store.Append(protocol.AuditEvent{
+			Ev:        "cancelled",
+			RID:       rid,
+			Step:      "confirm",
+			ConfirmOf: parentRID,
+			By:        by,
+			Reason:    reason,
+			UID:       rec.UID,
+			Argv:      rec.Argv,
+		})
+
+		if parentRID != "" {
+			s.Store.Cancel(parentRID, by, reason)
+			s.Store.Consume(parentRID, "cancelled", by)
+			s.Store.SaveResult(parentRID, -1, "cancelled")
+			s.closeCard(parentRID, protocol.RunRequest{Argv: rec.Argv}, rec.UID, "cancelled", by)
+			s.resumeStored(parentRID)
+			s.Store.Append(protocol.AuditEvent{
+				Ev:     "cancelled",
+				RID:    parentRID,
+				Step:   "initial",
+				By:     by,
+				Reason: reason,
+				UID:    rec.UID,
+				Argv:   rec.Argv,
+			})
+		}
+		return protocol.CancelResponse{Cancelled: true}
+	}
+
+	// rec.Step == "initial" (or default)
+	if v != nil {
+		if v.Decision == "deny" {
+			return protocol.CancelResponse{Cancelled: false, Error: "already denied"}
+		}
+		if v.Decision == "approve" {
+			childRID, childRec := s.Store.FindConfirmation(rid)
+			if childRec == nil {
+				return protocol.CancelResponse{Cancelled: false, Error: "already executed"}
+			}
+			if cv := s.Store.Verdict(childRID); cv != nil && cv.Decision != "cancelled" {
+				return protocol.CancelResponse{Cancelled: false, Error: "already decided"}
+			}
+			if childRec.Expires <= now {
+				return protocol.CancelResponse{Cancelled: false, Error: "already expired"}
+			}
+			// Cancel child confirmation as well
+			s.Store.Cancel(childRID, by, reason)
+			s.Store.Consume(childRID, "cancelled", by)
+			s.Store.SaveResult(childRID, -1, "cancelled")
+			s.closeCard(childRID, protocol.RunRequest{Argv: childRec.Argv}, childRec.UID, "cancelled", by)
+			s.resumeStored(childRID)
+			s.Store.Append(protocol.AuditEvent{
+				Ev:        "cancelled",
+				RID:       childRID,
+				Step:      "confirm",
+				ConfirmOf: rid,
+				By:        by,
+				Reason:    reason,
+				UID:       childRec.UID,
+				Argv:      childRec.Argv,
+			})
+		}
+	} else if rec.Expires <= now {
+		return protocol.CancelResponse{Cancelled: false, Error: "already expired"}
+	}
+
+	s.Store.Cancel(rid, by, reason)
+	s.Store.Consume(rid, "cancelled", by)
+	s.Store.SaveResult(rid, -1, "cancelled")
+	s.closeCard(rid, protocol.RunRequest{Argv: rec.Argv}, rec.UID, "cancelled", by)
+	s.resumeStored(rid)
+	s.Store.Append(protocol.AuditEvent{
+		Ev:     "cancelled",
+		RID:    rid,
+		Step:   "initial",
+		By:     by,
+		Reason: reason,
+		UID:    rec.UID,
+		Argv:   rec.Argv,
+	})
+	return protocol.CancelResponse{Cancelled: true}
+}
+
 // isAdminUID reports whether callerUID may issue verdicts or mutate
 // policy/config: root, or the UID the daemon itself runs as (local
 // operator over the unix socket).
@@ -744,6 +958,9 @@ func (s Service) await(rid string, expires time.Time, cancel <-chan struct{}) *t
 	for {
 		if v := s.Store.Verdict(rid); v != nil {
 			return &telegram.Verdict{RID: rid, Decision: v.Decision, By: v.By}
+		}
+		if c := s.Store.CancelInfo(rid); c != nil {
+			return &telegram.Verdict{RID: rid, Decision: "cancelled", By: c.By}
 		}
 		if time.Now().After(expires) {
 			return nil
@@ -871,7 +1088,11 @@ func (s Service) closeCard(rid string, req protocol.RunRequest, uid uint32, deci
 	if left < 0 {
 		left = 0
 	}
-	s.activeTG().Edit(rec.ChatID, rec.MsgID, telegram.Card(s.Host, req.Argv,
+	argv := req.Argv
+	if len(argv) == 0 {
+		argv = rec.Argv
+	}
+	s.activeTG().Edit(rec.ChatID, rec.MsgID, telegram.Card(s.Host, argv,
 		rec.UID, rec.Cwd, rid, left, decision, by, s.Conf.DryRun, rec.AsUID),
 		telegram.EmptyButtons())
 }
@@ -1093,6 +1314,10 @@ func (s Service) TelegramPump() {
 				continue
 			}
 			s.Store.Select(v.RID, rec.Options[v.Idx], v.Idx, cleanBy("telegram:"+v.By))
+			continue
+		}
+		if v.Decision == "cancel" || v.Decision == "cancelled" {
+			s.Cancel(protocol.CancelRequest{ID: v.RID, By: "telegram:" + v.By, Reason: "telegram"}, uint32(os.Getuid()))
 			continue
 		}
 		s.Store.Consume(v.RID, v.Decision, v.By)

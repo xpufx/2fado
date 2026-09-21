@@ -233,6 +233,8 @@ func resolutionHead(verdict, by string, dry bool) string {
 		return "⌛ <b>Expired — timed out</b>"
 	case "client_aborted":
 		return "⌛ <b>Aborted — caller disconnected</b>"
+	case "cancelled":
+		return fmt.Sprintf("🛑 <b>Cancelled via %s</b>", html.EscapeString(sourceLabel(by)))
 	case "confirm":
 		return "⚠️ <b>Are you sure? Tap again to run</b>"
 	default:
@@ -331,6 +333,8 @@ func AskCard(host, question, link, rid string, expiresIn int64, chosen bool, sel
 	head := "❓ <b>Question — pick one</b>"
 	if chosen {
 		head = fmt.Sprintf("✅ <b>Chosen: %s</b>", html.EscapeString(selection))
+	} else if by != "" && by != "client" {
+		head = fmt.Sprintf("🛑 <b>Cancelled via %s</b>", html.EscapeString(sourceLabel(by)))
 	}
 	card := fmt.Sprintf("%s\n🖥️ host: <code>%s</code>\n📝 question:\n%s",
 		head, html.EscapeString(host), expandablePre(html.EscapeString(q)))
@@ -339,6 +343,8 @@ func AskCard(host, question, link, rid string, expiresIn int64, chosen bool, sel
 	}
 	if chosen {
 		card += fmt.Sprintf("\n👤 chosen by: <code>%s</code>", html.EscapeString(sourceLabel(by)))
+	} else if by != "" && by != "client" {
+		card += fmt.Sprintf("\n👤 cancelled by: <code>%s</code>", html.EscapeString(sourceLabel(by)))
 	}
 	return fmt.Sprintf("%s\n🕒 expires in %ds · ask %s", card, expiresIn, spillID(html.EscapeString(rid)))
 }

@@ -94,6 +94,10 @@ func (s Service) AskWithCancel(req protocol.AskRequest, uid uint32, cancel <-cha
 
 	sel, aborted := s.awaitSelection(rid, expires, cancel)
 	if aborted {
+		if c := s.Store.CancelInfo(rid); c != nil {
+			s.closeAskCard(rid, "", c.By)
+			return protocol.AskResult{Status: "denied", ID: rid, Question: question, Reason: "cancelled"}
+		}
 		s.closeAskCard(rid, "", "client")
 		s.Store.Append(protocol.AuditEvent{Ev: "client_aborted", UID: uid, RID: rid})
 		return protocol.AskResult{Status: "denied", ID: rid, Question: question, Reason: "client_aborted"}
@@ -111,13 +115,17 @@ func (s Service) AskWithCancel(req protocol.AskRequest, uid uint32, cancel <-cha
 }
 
 // awaitSelection polls the store for a recorded choice. It returns
-// (nil, false) on expiry and (nil, true) when the caller disconnected.
+// (sel, false) on pick, (nil, true) when cancelled or caller disconnected,
+// and (nil, false) on expiry.
 func (s Service) awaitSelection(rid string, expires time.Time, cancel <-chan struct{}) (*protocol.SelectionRecord, bool) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		if sel := s.Store.SelectionInfo(rid); sel != nil {
 			return sel, false
+		}
+		if s.Store.CancelInfo(rid) != nil {
+			return nil, true
 		}
 		if time.Now().After(expires) {
 			return nil, false

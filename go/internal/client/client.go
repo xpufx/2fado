@@ -168,6 +168,28 @@ func Ack(sock, id string) int {
 	return 0
 }
 
+// Cancel submits a cancellation request for a petition id.
+func Cancel(sock, id, reason string) int {
+	raw, err := call(sock, protocol.ClientMessage{
+		Cancel: &protocol.CancelRequest{ID: id, Reason: reason, By: "cli"},
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "2fado: "+err.Error())
+		return 1
+	}
+	var res protocol.CancelResponse
+	if err := json.Unmarshal(raw, &res); err != nil {
+		fmt.Fprintln(os.Stderr, "2fado: bad reply")
+		return 1
+	}
+	if res.Error != "" {
+		fmt.Fprintf(os.Stderr, "2fado: cancel rejected (%s)\n", res.Error)
+		return 1
+	}
+	fmt.Printf("{cancelled: %v}\n", res.Cancelled)
+	return 0
+}
+
 // Status queries the state and execution outcome of a request id.
 func Status(sock, id string) int {
 	raw, err := call(sock, protocol.ClientMessage{
@@ -188,7 +210,7 @@ func Status(sock, id string) int {
 	if res.Status == "completed" {
 		return res.Exit
 	}
-	if res.Status == "not_found" || res.Status == "denied" || res.Status == "timeout" {
+	if res.Status == "not_found" || res.Status == "denied" || res.Status == "timeout" || res.Status == "cancelled" {
 		return 1
 	}
 	return 0

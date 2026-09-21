@@ -1,6 +1,6 @@
 # Backend adapter — third-party contract
 
-Status: draft. Source of truth for the op inventory: `go/internal/protocol/protocol.go` (`ClientMessage`, 13 ops: run, verdict, notify, ask, ack, list, recent, status, telegram_info, telegram_set_config, policy_add_rule, version, help).
+Status: draft. Source of truth for the op inventory: `go/internal/protocol/protocol.go` (`ClientMessage`, 14 ops: run, verdict, notify, ask, ack, cancel, list, recent, status, telegram_info, telegram_set_config, policy_add_rule, version, help).
 
 This page defines what a third-party backend implements so a third-party consumer can use it without the reference daemon.
 
@@ -9,7 +9,7 @@ This page defines what a third-party backend implements so a third-party consume
 - Unix socket, JSON-lines: one JSON object + `\n` per request, one JSON line back, fresh connection per call.
 - Socket timeout 2000ms per candidate (`telegram_info` uses 8000ms); every RPC wrapped in a 5s-timeout, max-4-inflight guard.
 - Socket candidate order: per-call `socketPath` → `$TWOFADO_SOCKET` → `$FADO_SOCKET` → `$TWOFADO_RUN_DIR/2fado.sock` → `$XDG_RUNTIME_DIR/2fado/2fado.sock` → `/tmp/2fado.sock`. The daemon's canonical socket is `$XDG_RUNTIME_DIR/2fado/2fado.sock` (see docs/daemon-service.md).
-- Envelope (`protocol.ClientMessage`): exactly one field set. Third-party consumers use 8 of 13 ops (list, verdict, ack, recent, status, telegram_info, telegram_set_config, policy_add_rule — see the op table below); `run`, `notify`, `ask`, `version`, `help` are producer/CLI-only or discovery today (see `docs/backend-cli.md`).
+- Envelope (`protocol.ClientMessage`): exactly one field set. Third-party consumers use 9 of 14 ops (list, verdict, cancel, ack, recent, status, telegram_info, telegram_set_config, policy_add_rule — see the op table below); `run`, `notify`, `ask`, `version`, `help` are producer/CLI-only or discovery today (see `docs/backend-cli.md`).
 
 ## Op table (consumer → backend)
 
@@ -17,6 +17,7 @@ This page defines what a third-party backend implements so a third-party consume
 |---|---|---|
 | `{list:{}}` | `ListRequest{}` | `PendingList{items: PendingItem{id,argv,uid,as_uid,cwd,expires_in,step,confirm_of,preview,auth_url,kind,link,summary,question,options,selection,selection_idx,acked,ack_by}}` |
 | `{verdict:{id,decision,by:"consumer"}}` | `VerdictSubmit{id,decision:approve\|deny,by}` | `VerdictAck{recorded}` |
+| `{cancel:{id,reason,by:"consumer"}}` | `CancelRequest{id,reason,by}` | `CancelResponse{cancelled,error}` |
 | `{ack:{id,by:"consumer"}}` | `AckSubmit{id,by}` | `AckResponse{acked}` |
 | `{recent:{limit}}` | `RecentRequest{limit}` | `RecentList{items: RecentItem{id,argv,cwd,as_uid,decision,by,exit,output,step,confirm_of,auth_url,kind,link,summary,question,options,selection,selection_idx,acked,ack_by}}` |
 | `{status:{id}}` | `StatusRequest{id}` | `StatusResponse{id,status,argv,cwd,uid,as_uid,expires_in,decision,by,exit,output,step,confirm_of,preview,auth_url,kind,link,summary,question,options,selection,selection_idx,acked,ack_by,ack_at}` |
@@ -24,7 +25,7 @@ This page defines what a third-party backend implements so a third-party consume
 | `{telegram_set_config:{bot_token,chat_id,approvers}}` | `TelegramSetConfigRequest{bot_token?,chat_id?,approvers?}` | `TelegramSetConfigResponse{success,bot_username,error}` |
 | `{policy_add_rule:{target,match_type,pattern}}` | `PolicyAddRuleRequest{target:whitelist\|blacklist,match_type:exact\|base\|custom,pattern[]}` | `PolicyAddRuleResponse{success,error,rules_count}` |
 
-Consumer-side mapping notes (third-party consumer implements this): `PendingItem` is camelCased plus `host=os.hostname()`, `caller=String(uid)`, `step` normalized to `"confirm"|"initial"`; `status` whitelisted to `not_found|pending|confirming|running|completed|denied|timeout|client_aborted|confirmation_timeout|acked|selected`, else `not_found`; telegram falls back to `configured?connected:unconfigured`.
+Consumer-side mapping notes (third-party consumer implements this): `PendingItem` is camelCased plus `host=os.hostname()`, `caller=String(uid)`, `step` normalized to `"confirm"|"initial"`; `status` whitelisted to `not_found|pending|confirming|running|completed|denied|timeout|client_aborted|confirmation_timeout|acked|selected|cancelled`, else `not_found`; telegram falls back to `configured?connected:unconfigured`.
 
 ## PendingItem: core vs optional
 
@@ -36,7 +37,7 @@ MAY: `preview{resolved_binary,target_cwd,affected_count,sample_paths,risk_level,
 
 ## Status lifecycle
 
-`pending → running → completed | denied | timeout`, with `confirming` as the transient 2-step state between first approval and execution, plus terminal `not_found | client_aborted | confirmation_timeout | acked | selected`. Client behavior that constrains backends: after approve, polls `approval.status` ~350ms × 60 for `confirming→completed` transitions; without `getStatus`, post-approve tracking degrades to fire-and-forget + recent poll.
+`pending → running → completed | denied | timeout`, with `confirming` as the transient 2-step state between first approval and execution, plus terminal `not_found | client_aborted | confirmation_timeout | acked | selected | cancelled`. Client behavior that constrains backends: after approve, polls `approval.status` ~350ms × 60 for `confirming→completed` transitions; without `getStatus`, post-approve tracking degrades to fire-and-forget + recent poll.
 
 ## Proposed `ApprovalBackend` boundary
 
@@ -44,11 +45,12 @@ MAY: `preview{resolved_binary,target_cwd,affected_count,sample_paths,risk_level,
 interface ApprovalBackend {
   kind: string; // e.g. "socket" | "third-party-id"
   capabilities: {
-    recent: boolean; statusPoll: boolean; ack: boolean;
+    recent: boolean; statusPoll: boolean; ack: boolean; cancel: boolean;
     policyRules: boolean; telegram: boolean; preview: boolean; twoStep: boolean;
   };
   listPending(input: {backendRef?: string}): Promise<PendingListOutput>;
   submitVerdict(input: {id: string; decision: "approve"|"deny"}): Promise<{recorded: boolean}>;
+  submitCancel(input: {id: string; reason?: string}): Promise<{cancelled: boolean; error?: string}>;
   submitAck(input: {id: string}): Promise<{acked: boolean}>;
   listRecent(input: {limit?: number}): Promise<RecentListOutput>;
   getStatus(input: {id: string}): Promise<StatusOutput>;

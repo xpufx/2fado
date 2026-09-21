@@ -209,6 +209,45 @@ func (s Store) SelectionInfo(rid string) *protocol.SelectionRecord {
 	return &sel
 }
 
+// Cancel writes a cancellation record exactly once (O_EXCL): first cancel wins.
+// Only valid on existing records; unknown IDs are rejected.
+func (s Store) Cancel(rid, by, reason string) bool {
+	if _, err := s.Load(rid); err != nil {
+		return false
+	}
+	data, err := json.Marshal(protocol.CancelRecord{
+		By:       by,
+		Reason:   reason,
+		UnixNano: time.Now().UnixNano(),
+	})
+	if err != nil {
+		return false
+	}
+	f, err := os.OpenFile(filepath.Join(s.Pending, rid+".cancel"),
+		os.O_WRONLY|os.O_CREATE|os.O_EXCL|noFollow, 0o600)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	if _, err = f.Write(data); err != nil {
+		return false
+	}
+	return f.Sync() == nil
+}
+
+// CancelInfo returns the recorded cancellation for a petition, if any.
+func (s Store) CancelInfo(rid string) *protocol.CancelRecord {
+	data, err := os.ReadFile(filepath.Join(s.Pending, rid+".cancel"))
+	if err != nil {
+		return nil
+	}
+	var c protocol.CancelRecord
+	if err := json.Unmarshal(data, &c); err != nil {
+		return nil
+	}
+	return &c
+}
+
 // DefaultPruneTTL is the retention window for decided or expired records.
 const DefaultPruneTTL = 24 * time.Hour
 
@@ -229,7 +268,7 @@ func (s Store) Prune(olderThan time.Duration) (int, error) {
 		switch {
 		case strings.HasSuffix(name, ".json"):
 			rid = strings.TrimSuffix(name, ".json")
-		case strings.HasSuffix(name, ".verdict"), strings.HasSuffix(name, ".result"), strings.HasSuffix(name, ".ack"), strings.HasSuffix(name, ".selection"):
+		case strings.HasSuffix(name, ".verdict"), strings.HasSuffix(name, ".result"), strings.HasSuffix(name, ".ack"), strings.HasSuffix(name, ".selection"), strings.HasSuffix(name, ".cancel"):
 			dot := strings.LastIndex(name, ".")
 			rid = name[:dot]
 		default:
@@ -240,11 +279,11 @@ func (s Store) Prune(olderThan time.Duration) (int, error) {
 		}
 		seen[rid] = true
 		rec, err := s.Load(rid)
-		if err == nil && s.Verdict(rid) == nil && s.AckInfo(rid) == nil && s.SelectionInfo(rid) == nil && rec.Expires > now.Unix() {
+		if err == nil && s.Verdict(rid) == nil && s.AckInfo(rid) == nil && s.SelectionInfo(rid) == nil && s.CancelInfo(rid) == nil && rec.Expires > now.Unix() {
 			continue
 		}
 		oldest := now
-		for _, suf := range []string{".json", ".verdict", ".result", ".ack", ".selection"} {
+		for _, suf := range []string{".json", ".verdict", ".result", ".ack", ".selection", ".cancel"} {
 			if fi, err := os.Stat(filepath.Join(s.Pending, rid+suf)); err == nil {
 				if fi.ModTime().Before(oldest) {
 					oldest = fi.ModTime()
@@ -266,6 +305,7 @@ func (s Store) Purge(rid string) error {
 	_ = os.Remove(filepath.Join(s.Pending, rid+".result"))
 	_ = os.Remove(filepath.Join(s.Pending, rid+".ack"))
 	_ = os.Remove(filepath.Join(s.Pending, rid+".selection"))
+	_ = os.Remove(filepath.Join(s.Pending, rid+".cancel"))
 	_ = os.Remove(filepath.Join(s.Dir, "sealed", rid+".tar.gz"))
 	_ = os.RemoveAll(filepath.Join(s.Dir, "sealed", rid+".d"))
 	return nil
@@ -282,13 +322,13 @@ func (s Store) FindConfirmation(parentRID string) (string, *protocol.PendingReco
 		if !strings.HasSuffix(name, ".json") {
 			continue
 		}
-		rid := strings.TrimSuffix(name, ".json")
-		rec, err := s.Load(rid)
+		r := strings.TrimSuffix(name, ".json")
+		rec, err := s.Load(r)
 		if err != nil {
 			continue
 		}
 		if rec.ConfirmOf == parentRID {
-			return rid, &rec
+			return r, &rec
 		}
 	}
 	return "", nil
@@ -316,6 +356,9 @@ func (s Store) List(now int64) []protocol.PendingItem {
 			continue
 		}
 		if s.SelectionInfo(rid) != nil {
+			continue
+		}
+		if s.CancelInfo(rid) != nil {
 			continue
 		}
 		rec, err := s.Load(rid)
@@ -402,7 +445,7 @@ func (s Store) Recent(limit int) []protocol.RecentItem {
 	var found []decided
 	for _, e := range entries {
 		name := e.Name()
-		if !strings.HasSuffix(name, ".verdict") && !strings.HasSuffix(name, ".ack") && !strings.HasSuffix(name, ".selection") {
+		if !strings.HasSuffix(name, ".verdict") && !strings.HasSuffix(name, ".ack") && !strings.HasSuffix(name, ".selection") && !strings.HasSuffix(name, ".cancel") {
 			continue
 		}
 		dot := strings.LastIndex(name, ".")
@@ -431,6 +474,31 @@ func (s Store) Recent(limit int) []protocol.RecentItem {
 	for _, f := range found {
 		rec, err := s.Load(f.rid)
 		if err != nil {
+			continue
+		}
+		step := rec.Step
+		if step == "" {
+			step = "initial"
+		}
+		if cancel := s.CancelInfo(f.rid); cancel != nil {
+			out = append(out, protocol.RecentItem{
+				ID:           f.rid,
+				Argv:         rec.Argv,
+				Cwd:          rec.Cwd,
+				AsUID:        rec.AsUID,
+				Decision:     "cancelled",
+				By:           cancel.By,
+				Exit:         -1,
+				Output:       cancel.Reason,
+				Step:         step,
+				ConfirmOf:    rec.ConfirmOf,
+				AuthURL:      rec.AuthURL,
+				Kind:         rec.Kind,
+				Link:         rec.Link,
+				Summary:      rec.Summary,
+				Question:     rec.Question,
+				Options:      rec.Options,
+			})
 			continue
 		}
 		if ack := s.AckInfo(f.rid); ack != nil {
@@ -472,18 +540,18 @@ func (s Store) Recent(limit int) []protocol.RecentItem {
 			continue
 		}
 		exit, output := s.loadResult(f.rid)
-		step := rec.Step
-		if step == "" {
-			step = "initial"
-		}
 		dec := v.Decision
 		if exit == -1 {
 			if output == "confirmation_timeout" {
 				dec = "timeout"
 			} else if output == "client_aborted" {
 				dec = "client_aborted"
+			} else if output == "cancelled" {
+				dec = "cancelled"
 			} else if childRID, _ := s.FindConfirmation(f.rid); childRID != "" {
-				if cv := s.Verdict(childRID); cv != nil {
+				if s.CancelInfo(childRID) != nil {
+					dec = "cancelled"
+				} else if cv := s.Verdict(childRID); cv != nil {
 					dec = cv.Decision
 				}
 			}
@@ -527,6 +595,13 @@ func (s Store) Status(rid string, now int64) protocol.StatusResponse {
 			Step: step, Kind: rec.Kind, Link: rec.Link, Summary: rec.Summary,
 			Question: rec.Question, Options: rec.Options,
 		}
+		if cancel := s.CancelInfo(rid); cancel != nil {
+			st.Status = "cancelled"
+			st.Decision = "cancelled"
+			st.By = cancel.By
+			st.Output = cancel.Reason
+			return st
+		}
 		if sel := s.SelectionInfo(rid); sel != nil {
 			st.Status = "selected"
 			st.Decision = "select"
@@ -544,6 +619,24 @@ func (s Store) Status(rid string, now int64) protocol.StatusResponse {
 		return st
 	}
 	if rec.Kind == "notify" {
+		if cancel := s.CancelInfo(rid); cancel != nil {
+			return protocol.StatusResponse{
+				ID:        rid,
+				Status:    "cancelled",
+				Decision:  "cancelled",
+				By:        cancel.By,
+				Output:    cancel.Reason,
+				Cwd:       rec.Cwd,
+				UID:       rec.UID,
+				AsUID:     rec.AsUID,
+				ExpiresIn: 0,
+				Exit:      -1,
+				Step:      step,
+				Kind:      rec.Kind,
+				Link:      rec.Link,
+				Summary:   rec.Summary,
+			}
+		}
 		if ack := s.AckInfo(rid); ack != nil {
 			return protocol.StatusResponse{
 				ID:        rid,
@@ -591,6 +684,24 @@ func (s Store) Status(rid string, now int64) protocol.StatusResponse {
 			Summary: rec.Summary,
 		}
 	}
+	if cancel := s.CancelInfo(rid); cancel != nil {
+		return protocol.StatusResponse{
+			ID:        rid,
+			Status:    "cancelled",
+			Decision:  "cancelled",
+			By:        cancel.By,
+			Output:    cancel.Reason,
+			Argv:      rec.Argv,
+			Cwd:       rec.Cwd,
+			UID:       rec.UID,
+			AsUID:     rec.AsUID,
+			Exit:      -1,
+			Step:      step,
+			ConfirmOf: rec.ConfirmOf,
+			Preview:   rec.Preview,
+			AuthURL:   rec.AuthURL,
+		}
+	}
 	v := s.Verdict(rid)
 	if v == nil {
 		if rec.Expires > now {
@@ -628,29 +739,66 @@ func (s Store) Status(rid string, now int64) protocol.StatusResponse {
 	data, err := os.ReadFile(resultPath)
 	if err != nil {
 		// Verdict recorded, but result file not yet written
+		if v.Decision == "cancelled" {
+			return protocol.StatusResponse{
+				ID:        rid,
+				Status:    "cancelled",
+				Decision:  "cancelled",
+				By:        v.By,
+				Argv:      rec.Argv,
+				Cwd:       rec.Cwd,
+				UID:       rec.UID,
+				AsUID:     rec.AsUID,
+				Exit:      -1,
+				Step:      step,
+				ConfirmOf: rec.ConfirmOf,
+				Preview:   rec.Preview,
+				AuthURL:   rec.AuthURL,
+			}
+		}
 		if v.Decision == "approve" {
 			// If this was an initial request, check if a child confirmation is awaiting verdict
 			if step == "initial" {
-				if childRID, childRec := s.FindConfirmation(rid); childRec != nil && s.Verdict(childRID) == nil {
-					expiresIn := childRec.Expires - now
-					if expiresIn < 0 {
-						expiresIn = 0
+				if childRID, childRec := s.FindConfirmation(rid); childRec != nil {
+					if c := s.CancelInfo(childRID); c != nil {
+						return protocol.StatusResponse{
+							ID:        rid,
+							Status:    "cancelled",
+							Decision:  "cancelled",
+							By:        c.By,
+							Output:    c.Reason,
+							Argv:      rec.Argv,
+							Cwd:       rec.Cwd,
+							UID:       rec.UID,
+							AsUID:     rec.AsUID,
+							Exit:      -1,
+							Step:      step,
+							ConfirmOf: rec.ConfirmOf,
+							Preview:   rec.Preview,
+							AuthURL:   rec.AuthURL,
+						}
 					}
-					return protocol.StatusResponse{
-						ID:        rid,
-						Status:    "confirming",
-						Decision:  v.Decision,
-						By:        v.By,
-						Argv:      rec.Argv,
-						Cwd:       rec.Cwd,
-						UID:       rec.UID,
-						AsUID:     rec.AsUID,
-						ExpiresIn: expiresIn,
-						Exit:      -1,
-						Step:      step,
-						ConfirmOf: rec.ConfirmOf,
-						Preview:   rec.Preview,
-						AuthURL:   rec.AuthURL,
+					if s.Verdict(childRID) == nil {
+						expiresIn := childRec.Expires - now
+						if expiresIn < 0 {
+							expiresIn = 0
+						}
+						return protocol.StatusResponse{
+							ID:        rid,
+							Status:    "confirming",
+							Decision:  v.Decision,
+							By:        v.By,
+							Argv:      rec.Argv,
+							Cwd:       rec.Cwd,
+							UID:       rec.UID,
+							AsUID:     rec.AsUID,
+							ExpiresIn: expiresIn,
+							Exit:      -1,
+							Step:      step,
+							ConfirmOf: rec.ConfirmOf,
+							Preview:   rec.Preview,
+							AuthURL:   rec.AuthURL,
+						}
 					}
 				}
 			}
@@ -695,6 +843,9 @@ func (s Store) Status(rid string, now int64) protocol.StatusResponse {
 	decision := v.Decision
 	if v.Decision == "deny" {
 		status = "denied"
+	} else if v.Decision == "cancelled" || r.Output == "cancelled" {
+		status = "cancelled"
+		decision = "cancelled"
 	} else if v.Decision == "timeout" || v.Decision == "confirmation_timeout" || r.Output == "confirmation_timeout" {
 		status = "timeout"
 		if r.Output == "confirmation_timeout" {
@@ -707,7 +858,13 @@ func (s Store) Status(rid string, now int64) protocol.StatusResponse {
 		}
 	} else if r.Exit == -1 {
 		if childRID, _ := s.FindConfirmation(rid); childRID != "" {
-			if cv := s.Verdict(childRID); cv != nil {
+			if c := s.CancelInfo(childRID); c != nil {
+				decision = "cancelled"
+				status = "cancelled"
+				if c.Reason != "" {
+					r.Output = c.Reason
+				}
+			} else if cv := s.Verdict(childRID); cv != nil {
 				decision = cv.Decision
 				if cv.Decision == "deny" {
 					status = "denied"
@@ -715,6 +872,8 @@ func (s Store) Status(rid string, now int64) protocol.StatusResponse {
 					status = "timeout"
 				} else if cv.Decision == "client_aborted" {
 					status = "client_aborted"
+				} else if cv.Decision == "cancelled" {
+					status = "cancelled"
 				}
 			}
 		}

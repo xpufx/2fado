@@ -1,6 +1,6 @@
 # Backend API — third-party consumer RPC reference (`approval.*`)
 
-Status: draft. This describes the contract a third-party consumer implements against the daemon socket API; op inventory source of truth is `go/internal/protocol/protocol.go` (`ClientMessage`, 13 ops: run, verdict, notify, ask, ack, list, recent, status, telegram_info, telegram_set_config, policy_add_rule, version, help).
+Status: draft. This describes the contract a third-party consumer implements against the daemon socket API; op inventory source of truth is `go/internal/protocol/protocol.go` (`ClientMessage`, 14 ops: run, verdict, notify, ask, ack, cancel, list, recent, status, telegram_info, telegram_set_config, policy_add_rule, version, help).
 
 All consumer RPCs are validated on both sides. Every input carries optional `socketPath` (future `backendRef` alias — see `docs/backend-adapter.md`).
 
@@ -18,6 +18,12 @@ All consumer RPCs are validated on both sides. Every input carries optional `soc
 - Server: sends `{verdict:{id,decision,by:"consumer"}}`; returns `{recorded: raw.recorded === true}`. Missing input → `{recorded:false}`. Fail-soft: `{recorded:false}` + `log.warn`.
 - `by` is attribution only, never authority (see below).
 
+## `approval.cancel` — explicit cancellation
+
+- Input: `{id (min 1), reason?: string, socketPath?}`.
+- Output: `{cancelled: boolean, error?: string}`.
+- Server: sends `{cancel:{id,reason,by:"consumer"}}`. Missing/empty id → `{cancelled:false, error:"missing id"}`. Unblocks pending, confirming, and waiting ask operations safely and idempotently. Resumes suspended process groups immediately, closes cards, and audits the cancellation reason and actor.
+
 ## `approval.ack` — notify acknowledgement
 
 - Input: `{id (min 1), socketPath?}`.
@@ -34,7 +40,7 @@ All consumer RPCs are validated on both sides. Every input carries optional `soc
 ## `approval.status` — execution outcome
 
 - Input: `{id (min 1), socketPath?}`.
-- Output: `{id, status, argv?, cwd?, asUid?, expiresIn?, decision?, by?, exit, output?, step?, confirmOf?, kind?, link?, summary?, question?, options?, selection?, selectionIdx?, acked?, ackBy?, ackAt?, authUrl?}`, where `status ∈ not_found|pending|confirming|running|completed|denied|timeout|client_aborted|confirmation_timeout|acked|selected`.
+- Output: `{id, status, argv?, cwd?, asUid?, expiresIn?, decision?, by?, exit, output?, step?, confirmOf?, kind?, link?, summary?, question?, options?, selection?, selectionIdx?, acked?, ackBy?, ackAt?, authUrl?}`, where `status ∈ not_found|pending|confirming|running|completed|denied|timeout|client_aborted|confirmation_timeout|acked|selected|cancelled`.
 - Server: sends `{status:{id}}`; unknown daemon status → `not_found`; missing id → `{id:"",status:"not_found",exit:-1}`. Fail-soft: `{id,status:"not_found",exit:-1}`.
 - Client: after approve, polls ~350ms × 60 for `confirming→completed` transitions; without this op, tracking degrades to fire-and-forget + recent poll.
 
