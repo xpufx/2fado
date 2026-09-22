@@ -104,6 +104,7 @@ func notifyCmd(sock string, args []string) int {
 func askCmd(sock string, args []string) int {
 	var question, link, ttlStr string
 	var options []string
+	var multiSelect, allowWriteIn bool
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--question":
@@ -130,6 +131,10 @@ func askCmd(sock string, args []string) int {
 			}
 			i++
 			ttlStr = args[i]
+		case "--multi-select":
+			multiSelect = true
+		case "--allow-write-in":
+			allowWriteIn = true
 		default:
 			return usage()
 		}
@@ -146,7 +151,7 @@ func askCmd(sock string, args []string) int {
 		}
 		ttlSeconds = int64(d / time.Second)
 	}
-	return client.Ask(sock, question, options, link, ttlSeconds)
+	return client.Ask(sock, question, options, link, ttlSeconds, multiSelect, allowWriteIn)
 }
 
 // cancelCmd parses: 2fado cancel <id> [--reason <text>].

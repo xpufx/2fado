@@ -121,9 +121,9 @@ func Notify(sock, link, summary string, ttlSeconds int64) int {
 // Ask ships a question + options and blocks until the operator selects one
 // or the petition expires. It prints the chosen option to stdout and exits
 // 0 on selection, 2 on timeout, 1 on rejection/transport error.
-func Ask(sock, question string, options []string, link string, ttlSeconds int64) int {
+func Ask(sock, question string, options []string, link string, ttlSeconds int64, multiSelect bool, allowWriteIn bool) int {
 	raw, err := call(sock, protocol.ClientMessage{
-		Ask: &protocol.AskRequest{Question: question, Options: options, Link: link, TTLSeconds: ttlSeconds},
+		Ask: &protocol.AskRequest{Question: question, Options: options, Link: link, TTLSeconds: ttlSeconds, MultiSelect: multiSelect, AllowWriteIn: allowWriteIn},
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "2fado: "+err.Error())

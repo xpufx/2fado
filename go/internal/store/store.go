@@ -249,7 +249,7 @@ func (s Store) CancelInfo(rid string) *protocol.CancelRecord {
 }
 
 // DefaultPruneTTL is the retention window for decided or expired records.
-const DefaultPruneTTL = 24 * time.Hour
+const DefaultPruneTTL = 30 * 24 * time.Hour
 
 // Prune deletes decided (.verdict), acked (.ack), or expired records older
 // than the TTL, keeping live undecided, unacked, unexpired petitions.
