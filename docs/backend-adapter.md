@@ -4,6 +4,13 @@ Status: draft. Source of truth for the op inventory: `go/internal/protocol/proto
 
 This page defines what a third-party backend implements so a third-party consumer can use it without the reference daemon.
 
+## Security & Privilege Escalation Boundary
+
+Privilege escalation is disabled in the default build and no escalation features are promised:
+- Third-party backends and consumers must assume all operations execute strictly under the unprivileged daemon process identity.
+- Identity fields (e.g. `as_uid`) in petition structures are non-escalating; privilege-switching logic is completely excluded from default release builds.
+- Backends must not rely on or promise elevated root execution or credential delegation.
+
 ## Transport (today)
 
 - Unix socket, JSON-lines: one JSON object + `\n` per request, one JSON line back, fresh connection per call.

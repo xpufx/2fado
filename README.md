@@ -22,6 +22,13 @@ excludes `internal/service/escalation_on.go`, so the shipped binary provably
 lacks the escalation symbols. Build with `-tags escalation` to include it
 out-of-band for development.
 
+### Security & Privilege Boundary
+
+`2fado` operates strictly unprivileged as the current user. **Privilege escalation is disabled in the default build and no escalation features are promised.**
+- Approved commands execute strictly under the daemon user UID/GID and environment.
+- Default builds strictly omit privilege-switching symbols (`internal/service/escalation_on.go` is excluded).
+- No root execution, credential delegation, or identity escalation is promised or provided.
+
 ```
 go/          Go module (stdlib only): single `2fado` binary —
               `daemon | run -- <argv...> | approve|deny <id> |

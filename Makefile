@@ -211,9 +211,6 @@ test:
 fmt:
 	cd go && gofmt -w .
 
-test:
-	cd go && go test ./...
-
 cross-build:
 	@VERSION="$(VERSION)" DIST_DIR="$(DIST_DIR)" ./scripts/build-cross.sh
 

@@ -4,6 +4,13 @@ Status: draft. Daemon-side refs: `go/cmd/2fado/main.go` (subcommands, usage, env
 
 Third parties should mirror this surface for operator parity. Producer-side ops (`run`/`notify`/`ask`) vs consumer-side ops (list/verdict/status) — whether both are required is an open question (see `docs/backend-adapter.md`).
 
+## Security & Privilege Escalation Boundary
+
+Privilege escalation is disabled in the default build and no escalation features are promised:
+- The CLI and daemon operate strictly under the unprivileged user identity.
+- Execution-identity switching code is not compiled into the default binary (`internal/service/escalation_on.go` excluded).
+- No root escalation, setuid execution, or sudo delegation is provided or promised.
+
 ## Subcommands
 
 ```
@@ -15,12 +22,12 @@ Third parties should mirror this surface for operator parity. Producer-side ops 
   | 2fado version | 2fado socket-version
 ```
 
-- `daemon` — run the privileged service. Config path via `TWOFADO_CONF`/`FADO_CONF`/`2FADO_CONF`, default `/etc/2fado/2fado.conf`.
+- `daemon` — run the unprivileged approval daemon service. Config path via `TWOFADO_CONF`/`FADO_CONF`/`2FADO_CONF`, default `/etc/2fado/2fado.conf`.
 - `run -- <argv...> [--detach|-d|--async]` — petition to execute. Ships `RunRequest{argv,cwd,env,detach?}` as `{run:{...}}`. Without `--detach`, a `pending` answer prints `request submitted, waiting for approval (id: …)` to stderr and exits 1; with `--detach`, prints `request submitted (id: …). Detached. Use '2fado status <id>'…` and exits 0.
 - `approve|deny <id>` — local verdict (PoC; production: SSO-bound UI). Sends `{verdict:{id,decision}}`, prints `{recorded: …}`. Rejected verdicts print `verdict rejected (…)` to stderr, exit 1.
 - `cancel <id> [--reason <text>]` — cancel a pending, confirming, or waiting ask petition safely and idempotently. Admins or the original petition creator UID may cancel. Process groups are resumed immediately, Telegram/Paseo cards are closed, and cancellation reason is audited. Sends `{cancel:{id,reason,by:"cli"}}`, prints `{cancelled: true}`. Rejections print `cancel rejected (…)`, exit 1.
 - `notify --link <url> --summary <text> [--ttl <dur>]` — create a no-exec notify-only petition (human-presence step: 2FA link, staged approval, FYI+ack). Sends `{notify:{link,summary,ttl_seconds?}}` (`--ttl` parsed as Go duration, e.g. `30m`, `2h`, `24h`; `0` = default long TTL). Prints `notify submitted (id: …)`; rejects print `notify rejected (…)`.
-- `ask --question <q> --option <o> [--option <o>...] [--link <url>] [--ttl <dur>]` — create an interactive multi-choice question petition (operator picks one of the options). Sends `{ask:{question,options,link?,ttl_seconds?}}` (requires at least two options). Blocks until operator selects or TTL expires. Prints chosen option to stdout and exits 0 on selection, 2 on timeout, 1 on rejection/transport error.
+- `ask --question <q> --option <o> [--option <o>...] [--link <url>] [--ttl <dur>] [--multi-select] [--allow-write-in]` — create an interactive choice question petition. Sends `{ask:{question,options,link?,ttl_seconds?,multi_select?,allow_write_in?}}` (requires at least two options). Blocks until selection lands or TTL expires. Prints chosen option to stdout and exits 0 on selection, 2 on timeout, 1 on rejection/transport error. Note (#74): `--multi-select` and `--allow-write-in` flags are persisted in protocol/store for compatibility; interactive single-choice resolution is active in current reference daemon builds.
 - `ack <id>` — acknowledge a notify petition. Sends `{ack:{id}}`, prints `{acked: …}`; rejects print `ack rejected (…)`.
 - `status <id>` — inspect state and execution result. Sends `{status:{id}}`, pretty-prints the `StatusResponse` JSON.
 - `list` — inspect pending queue. Sends `{list:{}}`, prints one block per item (id, argv, cwd, step/confirm_of, kind, expires_in).

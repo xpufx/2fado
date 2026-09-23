@@ -4,12 +4,20 @@ Status: draft. This describes the contract a third-party consumer implements aga
 
 All consumer RPCs are validated on both sides. Every input carries optional `socketPath` (future `backendRef` alias — see `docs/backend-adapter.md`).
 
+## Security & Privilege Escalation Boundary
+
+Privilege escalation is disabled in the default build and no escalation features are promised:
+- Daemon and CLI operations execute strictly unprivileged with the daemon process UID/GID and environment.
+- The default binary excludes privilege-switching implementation code at compile time.
+- All requests and responses operate inside the daemon user boundary; no credential delegation or elevated execution is supported.
+
 ## `approval.list` — pending queue
 
 - Input: `{socketPath?}`.
 - Output: `{items: [{id, argv, host, caller, cwd, asUid, expiresIn, step: initial|confirm (default initial), confirmOf?, kind?, link?, summary?, question?, options?, selection?, selectionIdx?, acked?, ackBy?, authUrl?, preview?}]}`.
 - Server: sends `{list:{}}`, camelCases daemon `PendingList`, sets `host=os.hostname()`, `caller=String(uid)`. Fail-soft: `{items:[]}` + `log.warn`.
 - Client: polls every 3s (`POLL_MS`); toast per new id; `kind==="notify"` renders Ack-only cards (no argv); `kind==="ask"` renders interactive choice cards with options; `step==="confirm"` renders danger styling + `confirmOf` dedup against Recent.
+  - *Ask multi-select & write-in status (#74)*: Protocol fields `multi_select` and `allow_write_in` are preserved on petition/selection structures for schema compatibility. In current reference daemon builds, interactive questions evaluate single option selections (`selection_idx` / `selection`); multi-select aggregation and write-in validation are deferred.
 
 ## `approval.verdict` — approve / deny
 

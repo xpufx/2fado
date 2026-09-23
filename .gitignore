@@ -34,3 +34,11 @@ coverage.out
 .env*
 *.pem
 *.key
+# Editor, OS & temporary files.
+*.swp
+*.swo
+*~
+.DS_Store
+.vscode/
+.idea/
+
