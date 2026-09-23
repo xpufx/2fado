@@ -75,6 +75,93 @@ func TestPruneKeepsFreshDecided(t *testing.T) {
 	}
 }
 
+func TestAuditQueryFiltersAndPagination(t *testing.T) {
+	st := New(t.TempDir())
+	if err := st.Init(); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		ev := "exec"
+		if i%2 == 0 {
+			ev = "request"
+		}
+		st.Append(protocol.AuditEvent{Ev: ev, UID: 1000, RID: "rid-a"})
+	}
+	st.Append(protocol.AuditEvent{Ev: "deny", UID: 2000, RID: "rid-b"})
+
+	// Newest first, unfiltered.
+	all := st.AuditQuery(protocol.AuditQueryRequest{})
+	if len(all.Items) != 6 {
+		t.Fatalf("unfiltered audit = %d items, want 6", len(all.Items))
+	}
+	if all.NextCursor != "" {
+		t.Fatalf("single page should exhaust cursor, got %q", all.NextCursor)
+	}
+	if all.Items[len(all.Items)-1].RID != "rid-a" {
+		t.Fatalf("oldest item = %+v, want rid-a", all.Items[len(all.Items)-1])
+	}
+
+	// Exact-match ev filter.
+	reqs := st.AuditQuery(protocol.AuditQueryRequest{Ev: "request"})
+	if len(reqs.Items) != 3 {
+		t.Fatalf("ev=request = %d items, want 3", len(reqs.Items))
+	}
+	for _, it := range reqs.Items {
+		if it.Ev != "request" {
+			t.Fatalf("ev filter leaked %+v", it)
+		}
+	}
+
+	// RID and UID filters AND together.
+	filtered := st.AuditQuery(protocol.AuditQueryRequest{ID: "rid-a", UID: 1000})
+	if len(filtered.Items) != 5 {
+		t.Fatalf("id+uid filter = %d items, want 5", len(filtered.Items))
+	}
+	none := st.AuditQuery(protocol.AuditQueryRequest{ID: "rid-a", UID: 2000})
+	if len(none.Items) != 0 {
+		t.Fatalf("id+uid mismatch = %d items, want 0", len(none.Items))
+	}
+
+	// Bounded pagination: page of 2, cursor walks older pages.
+	page1 := st.AuditQuery(protocol.AuditQueryRequest{Limit: 2})
+	if len(page1.Items) != 2 || page1.NextCursor == "" {
+		t.Fatalf("page1 = %d items, cursor %q", len(page1.Items), page1.NextCursor)
+	}
+	page2 := st.AuditQuery(protocol.AuditQueryRequest{Limit: 2, Cursor: page1.NextCursor})
+	if len(page2.Items) != 2 || page2.NextCursor == "" {
+		t.Fatalf("page2 = %d items, cursor %q", len(page2.Items), page2.NextCursor)
+	}
+	page3 := st.AuditQuery(protocol.AuditQueryRequest{Limit: 2, Cursor: page2.NextCursor})
+	if len(page3.Items) != 2 || page3.NextCursor != "" {
+		t.Fatalf("page3 = %d items, cursor %q (want exhausted)", len(page3.Items), page3.NextCursor)
+	}
+	seen := map[string]bool{}
+	for _, it := range append(append(page1.Items, page2.Items...), page3.Items...) {
+		seen[it.RID] = true
+	}
+	if !seen["rid-b"] || !seen["rid-a"] {
+		t.Fatalf("pagination missed records: %v", seen)
+	}
+}
+
+func TestAuditQueryEmptyAndBadCursor(t *testing.T) {
+	st := New(t.TempDir())
+	if err := st.Init(); err != nil {
+		t.Fatal(err)
+	}
+	empty := st.AuditQuery(protocol.AuditQueryRequest{})
+	if empty.Items == nil {
+		t.Fatal("empty audit must return non-nil items slice")
+	}
+	if len(empty.Items) != 0 {
+		t.Fatalf("empty audit = %d items, want 0", len(empty.Items))
+	}
+	bad := st.AuditQuery(protocol.AuditQueryRequest{Cursor: "not-a-number"})
+	if len(bad.Items) != 0 || bad.NextCursor != "" {
+		t.Fatalf("bad cursor = %+v, want empty", bad)
+	}
+}
+
 func TestAsUIDExposedOnListStatusRecent(t *testing.T) {
 	st := New(t.TempDir())
 	if err := st.Init(); err != nil {

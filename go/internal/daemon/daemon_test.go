@@ -156,6 +156,84 @@ func TestDaemonTelegramSocketEndpoints(t *testing.T) {
 	_ = sendAndRecv(`{"telegram_set_config":{"bot_token":""}}`)
 }
 
+// TestDaemonAuditSocketRoundTrip exercises the audit op end to end over the
+// unix socket: seed an audit event, query it back with a bounded page.
+func TestDaemonAuditSocketRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	sockPath := filepath.Join(tmpDir, "audit.sock")
+	t.Setenv("TWOFADO_USER_CONFIG", filepath.Join(tmpDir, "config.json"))
+
+	cfg := config.Conf{
+		Socket:   sockPath,
+		StateDir: tmpDir,
+		Timeout:  5,
+		Policy:   filepath.Join(tmpDir, "policy.json"),
+	}
+	svc := service.New(cfg)
+	svc.Store.Append(protocol.AuditEvent{Ev: "request", UID: 1000, RID: "audit-rid-1"})
+	svc.Store.Append(protocol.AuditEvent{Ev: "exec", UID: 1000, RID: "audit-rid-2"})
+	go func() {
+		_ = Serve(svc)
+	}()
+	for i := 0; i < 50; i++ {
+		if conn, err := net.Dial("unix", sockPath); err == nil {
+			conn.Close()
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	c, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	defer c.Close()
+	if _, err := c.Write([]byte(`{"audit":{"limit":1}}` + "\n")); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+	line, err := bufio.NewReader(c).ReadBytes('\n')
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+	var res protocol.AuditQueryResponse
+	if err := json.Unmarshal(line, &res); err != nil {
+		t.Fatalf("unmarshal audit response: %v (%s)", err, line)
+	}
+	if len(res.Items) != 1 || res.Items[0].Ev != "exec" || res.Items[0].RID != "audit-rid-2" {
+		t.Fatalf("audit page = %+v", res.Items)
+	}
+	if res.NextCursor == "" {
+		t.Fatal("expected next_cursor with an older event outstanding")
+	}
+
+	// Resume the cursor to fetch the next (older) event.
+	c2, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	defer c2.Close()
+	req := fmt.Sprintf(`{"audit":{"limit":1,"cursor":"%s"}}`+"\n", res.NextCursor)
+	if _, err := c2.Write([]byte(req)); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+	line2, err := bufio.NewReader(c2).ReadBytes('\n')
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+	var res2 protocol.AuditQueryResponse
+	if err := json.Unmarshal(line2, &res2); err != nil {
+		t.Fatalf("unmarshal audit page 2: %v (%s)", err, line2)
+	}
+	if len(res2.Items) != 1 || res2.Items[0].RID != "audit-rid-1" {
+		t.Fatalf("audit page 2 = %+v", res2.Items)
+	}
+
+	// 3. Verify the client.Audit consumer helper works over the socket.
+	if exitCode := client.Audit(sockPath, protocol.AuditQueryRequest{Limit: 1}); exitCode != 0 {
+		t.Fatalf("client.Audit returned %d, want 0", exitCode)
+	}
+}
+
 // TestDaemonAskSocketRoundTrip exercises the ask op end to end over the
 // unix socket: the blocking call resolves once a selection is recorded.
 func TestDaemonAskSocketRoundTrip(t *testing.T) {

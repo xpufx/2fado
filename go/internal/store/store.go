@@ -3,10 +3,12 @@
 package store
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -482,22 +484,22 @@ func (s Store) Recent(limit int) []protocol.RecentItem {
 		}
 		if cancel := s.CancelInfo(f.rid); cancel != nil {
 			out = append(out, protocol.RecentItem{
-				ID:           f.rid,
-				Argv:         rec.Argv,
-				Cwd:          rec.Cwd,
-				AsUID:        rec.AsUID,
-				Decision:     "cancelled",
-				By:           cancel.By,
-				Exit:         -1,
-				Output:       cancel.Reason,
-				Step:         step,
-				ConfirmOf:    rec.ConfirmOf,
-				AuthURL:      rec.AuthURL,
-				Kind:         rec.Kind,
-				Link:         rec.Link,
-				Summary:      rec.Summary,
-				Question:     rec.Question,
-				Options:      rec.Options,
+				ID:        f.rid,
+				Argv:      rec.Argv,
+				Cwd:       rec.Cwd,
+				AsUID:     rec.AsUID,
+				Decision:  "cancelled",
+				By:        cancel.By,
+				Exit:      -1,
+				Output:    cancel.Reason,
+				Step:      step,
+				ConfirmOf: rec.ConfirmOf,
+				AuthURL:   rec.AuthURL,
+				Kind:      rec.Kind,
+				Link:      rec.Link,
+				Summary:   rec.Summary,
+				Question:  rec.Question,
+				Options:   rec.Options,
 			})
 			continue
 		}
@@ -903,6 +905,103 @@ func (s Store) Append(ev protocol.AuditEvent) {
 		return
 	}
 	_ = appendNoFollow(s.Audit, append(data, '\n'), 0o600)
+}
+
+// Audit defaults: a page is bounded so one query never marshals the
+// whole trail, and the cursor is an absolute oldest-first line index so
+// it stays stable while new events append at the tail.
+const (
+	DefaultAuditLimit = 50
+	MaxAuditLimit     = 200
+)
+
+// AuditQuery returns a newest-first page of the append-only audit trail
+// with exact-match filters. Cursor is the absolute (oldest-first) line
+// index to resume at, inclusive; empty starts at the newest event. The
+// returned NextCursor is set only when the page filled the limit with
+// older events still unscanned, so a filtered query never loops on
+// empty pages. Events that fail to parse are skipped, never fatal.
+//
+// The log is read once as raw bytes and split into subslices; only the
+// events on the requested page are decoded, so the trail is never
+// materialized as a full slice of structs.
+func (s Store) AuditQuery(req protocol.AuditQueryRequest) protocol.AuditQueryResponse {
+	limit := req.Limit
+	if limit <= 0 {
+		limit = DefaultAuditLimit
+	}
+	if limit > MaxAuditLimit {
+		limit = MaxAuditLimit
+	}
+	data, err := os.ReadFile(s.Audit)
+	if err != nil && !os.IsNotExist(err) {
+		return protocol.AuditQueryResponse{Items: []protocol.AuditRecord{}}
+	}
+	lines := bytes.SplitAfter(data, []byte{'\n'})
+	start := len(lines) - 1
+	if req.Cursor != "" {
+		n, err := strconv.Atoi(req.Cursor)
+		if err != nil || n < 0 {
+			return protocol.AuditQueryResponse{Items: []protocol.AuditRecord{}}
+		}
+		start = n
+	}
+	if start >= len(lines) {
+		start = len(lines) - 1
+	}
+	items := []protocol.AuditRecord{}
+	next := ""
+	for i := start; i >= 0; i-- {
+		line := bytes.TrimSpace(lines[i])
+		if len(line) == 0 {
+			continue
+		}
+		var ev protocol.AuditEvent
+		if err := json.Unmarshal(line, &ev); err != nil {
+			continue
+		}
+		if !auditMatches(ev, req) {
+			continue
+		}
+		items = append(items, ev)
+		if len(items) == limit {
+			if i > 0 {
+				next = strconv.Itoa(i - 1)
+			}
+			break
+		}
+	}
+	return protocol.AuditQueryResponse{Items: items, NextCursor: next}
+}
+
+// auditMatches applies the ANDed exact-match filters. Ev, ID, and UID
+// match their fields; Since/Until bound the event timestamp in Unix
+// seconds, inclusive. A timestamp filter with an unparseable event time
+// excludes that event.
+func auditMatches(ev protocol.AuditEvent, req protocol.AuditQueryRequest) bool {
+	if req.Ev != "" && ev.Ev != req.Ev {
+		return false
+	}
+	if req.ID != "" && ev.RID != req.ID {
+		return false
+	}
+	if req.UID != 0 && ev.UID != req.UID {
+		return false
+	}
+	if req.Since != 0 || req.Until != 0 {
+		ts, err := time.Parse(time.RFC3339, ev.TS)
+		if err != nil {
+			return false
+		}
+		sec := ts.Unix()
+		if req.Since != 0 && sec < req.Since {
+			return false
+		}
+		if req.Until != 0 && sec > req.Until {
+			return false
+		}
+	}
+	return true
 }
 
 func (s Store) GetOffset() int64 {

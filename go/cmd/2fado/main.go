@@ -21,6 +21,7 @@ import (
 	"2fado/internal/client"
 	"2fado/internal/config"
 	"2fado/internal/daemon"
+	"2fado/internal/protocol"
 	"2fado/internal/service"
 )
 
@@ -31,7 +32,7 @@ var (
 )
 
 func usage() int {
-	fmt.Println("usage: 2fado daemon | 2fado run -- <argv...> | 2fado approve|deny <id> | 2fado cancel <id> [--reason <text>] | 2fado notify --link <url> --summary <text> [--ttl <dur>] | 2fado ask --question <q> --option <o> --option <o> [--link <url>] [--ttl <dur>] | 2fado ack <id> | 2fado status <id> | 2fado list | 2fado recent [--limit N] | 2fado version")
+	fmt.Println("usage: 2fado daemon | 2fado run -- <argv...> | 2fado approve|deny <id> | 2fado cancel <id> [--reason <text>] | 2fado notify --link <url> --summary <text> [--ttl <dur>] | 2fado ask --question <q> --option <o> --option <o> [--link <url>] [--ttl <dur>] | 2fado ack <id> | 2fado status <id> | 2fado list | 2fado recent [--limit N] | 2fado audit [--limit N] [--cursor C] [--ev E] [--id RID] [--uid U] [--since UNIX] [--until UNIX] | 2fado version")
 	return 2
 }
 
@@ -185,6 +186,88 @@ func cancelCmd(sock string, args []string) int {
 	return client.Cancel(sock, id, reason)
 }
 
+// auditCmd parses: 2fado audit [--limit N] [--cursor C] [--ev E] [--id RID]
+// [--uid U] [--since UNIX] [--until UNIX]. Prints one page of audit events.
+func auditCmd(sock string, args []string) int {
+	var req protocol.AuditQueryRequest
+	for i := 0; i < len(args); i++ {
+		needValue := func() (string, bool) {
+			if i+1 >= len(args) {
+				return "", false
+			}
+			i++
+			return args[i], true
+		}
+		switch args[i] {
+		case "--limit":
+			v, ok := needValue()
+			if !ok {
+				return usage()
+			}
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 0 {
+				fmt.Fprintln(os.Stderr, "2fado: bad --limit (want non-negative int)")
+				return 2
+			}
+			req.Limit = n
+		case "--cursor":
+			v, ok := needValue()
+			if !ok {
+				return usage()
+			}
+			req.Cursor = v
+		case "--ev":
+			v, ok := needValue()
+			if !ok {
+				return usage()
+			}
+			req.Ev = v
+		case "--id":
+			v, ok := needValue()
+			if !ok {
+				return usage()
+			}
+			req.ID = v
+		case "--uid":
+			v, ok := needValue()
+			if !ok {
+				return usage()
+			}
+			n, err := strconv.ParseUint(v, 10, 32)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "2fado: bad --uid (want uint32)")
+				return 2
+			}
+			req.UID = uint32(n)
+		case "--since":
+			v, ok := needValue()
+			if !ok {
+				return usage()
+			}
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || n < 0 {
+				fmt.Fprintln(os.Stderr, "2fado: bad --since (want unix seconds)")
+				return 2
+			}
+			req.Since = n
+		case "--until":
+			v, ok := needValue()
+			if !ok {
+				return usage()
+			}
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || n < 0 {
+				fmt.Fprintln(os.Stderr, "2fado: bad --until (want unix seconds)")
+				return 2
+			}
+			req.Until = n
+		default:
+			return usage()
+		}
+	}
+	return client.Audit(sock, req)
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		os.Exit(usage())
@@ -267,6 +350,8 @@ func main() {
 			i++
 		}
 		os.Exit(client.Recent(sock, limit))
+	case "audit":
+		os.Exit(auditCmd(sock, os.Args[2:]))
 	case "version", "-v", "--version":
 		os.Exit(printVersion())
 	case "socket-version":

@@ -49,6 +49,7 @@ type ClientMessage struct {
 	Cancel            *CancelRequest            `json:"cancel,omitempty"`
 	List              *ListRequest              `json:"list,omitempty"`
 	Recent            *RecentRequest            `json:"recent,omitempty"`
+	Audit             *AuditQueryRequest        `json:"audit,omitempty"`
 	Status            *StatusRequest            `json:"status,omitempty"`
 	TelegramInfo      *TelegramInfoRequest      `json:"telegram_info,omitempty"`
 	TelegramSetConfig *TelegramSetConfigRequest `json:"telegram_set_config,omitempty"`
@@ -429,6 +430,36 @@ type RecentList struct {
 	Items []RecentItem `json:"items"`
 }
 
+// AuditQueryRequest asks for audit-log history: the append-only trail of
+// every lifecycle event, not the capped Recent derived view. Cursor is an
+// opaque continuation token returned as NextCursor by the previous page
+// (empty starts at the newest event). Limit is bounded by the daemon
+// (default 50, max 200). Filters are exact-match and ANDed; Ev matches
+// AuditEvent.Ev, ID matches the rid, UID and Since/Until bound the
+// event time (Unix seconds, inclusive). Newest-first ordering.
+type AuditQueryRequest struct {
+	Cursor string `json:"cursor,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+	Ev     string `json:"ev,omitempty"`
+	ID     string `json:"id,omitempty"`
+	UID    uint32 `json:"uid,omitempty"`
+	Since  int64  `json:"since,omitempty"`
+	Until  int64  `json:"until,omitempty"`
+}
+
+// AuditRecord is one audit event as returned by AuditQueryResponse:
+// the full AuditEvent JSON. It may carry argv, cwd, or a question; it
+// never carries environment values, secrets, or credentials.
+type AuditRecord = AuditEvent
+
+// AuditQueryResponse answers AuditQueryRequest. NextCursor is empty when
+// the returned page is the last one; otherwise pass it back as Cursor to
+// fetch the next (older) page.
+type AuditQueryResponse struct {
+	Items      []AuditRecord `json:"items"`
+	NextCursor string        `json:"next_cursor,omitempty"`
+}
+
 // RunResult is the daemon's final answer to a run request.
 type RunResult struct {
 	Status string `json:"status"` // allowed | denied | pending
@@ -521,6 +552,7 @@ var responseTypes = map[string]reflect.Type{
 	"ack":                 reflect.TypeFor[AckResponse](),
 	"list":                reflect.TypeFor[PendingList](),
 	"recent":              reflect.TypeFor[RecentList](),
+	"audit":               reflect.TypeFor[AuditQueryResponse](),
 	"cancel":              reflect.TypeFor[CancelResponse](),
 	"status":              reflect.TypeFor[StatusResponse](),
 	"telegram_info":       reflect.TypeFor[TelegramInfoResponse](),

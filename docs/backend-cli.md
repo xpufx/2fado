@@ -1,6 +1,6 @@
 # Backend CLI — parity surface for third parties
 
-Status: draft. Daemon-side refs: `go/cmd/2fado/main.go` (subcommands, usage, env), `go/internal/client/client.go` (socket ops, exit codes), `go/internal/protocol/protocol.go` (envelope, request shapes — source of truth, `ClientMessage` 14 ops).
+Status: draft. Daemon-side refs: `go/cmd/2fado/main.go` (subcommands, usage, env), `go/internal/client/client.go` (socket ops, exit codes), `go/internal/protocol/protocol.go` (envelope, request shapes — source of truth, `ClientMessage` 15 ops).
 
 Third parties should mirror this surface for operator parity. Producer-side ops (`run`/`notify`/`ask`) vs consumer-side ops (list/verdict/status) — whether both are required is an open question (see `docs/backend-adapter.md`).
 
@@ -19,6 +19,7 @@ Privilege escalation is disabled in the default build and no escalation features
   | 2fado notify --link <url> --summary <text> [--ttl <dur>]
   | 2fado ask --question <q> --option <o> [--option <o>...] [--link <url>] [--ttl <dur>]
   | 2fado ack <id> | 2fado status <id> | 2fado list | 2fado recent [--limit N]
+  | 2fado audit [--limit N] [--cursor C] [--ev E] [--id RID] [--uid U] [--since UNIX] [--until UNIX]
   | 2fado version | 2fado socket-version
 ```
 
@@ -32,6 +33,7 @@ Privilege escalation is disabled in the default build and no escalation features
 - `status <id>` — inspect state and execution result. Sends `{status:{id}}`, pretty-prints the `StatusResponse` JSON.
 - `list` — inspect pending queue. Sends `{list:{}}`, prints one block per item (id, argv, cwd, step/confirm_of, kind, expires_in).
 - `recent [--limit N]` — inspect decided history. Sends `{recent:{limit}}` (`--limit` omitted → `0`, daemon default), prints one block per item (id, argv, decision, by, exit, step/confirm_of).
+- `audit [--limit N] [--cursor C] [--ev E] [--id RID] [--uid U] [--since UNIX] [--until UNIX]` — query the append-only audit trail. Sends `{audit:{cursor?,limit?,ev?,id?,uid?,since?,until?}}`, pretty-prints the `AuditQueryResponse` JSON (`items` newest-first, `next_cursor` for the next older page). Unlike `recent` (capped derived view), `audit` reads the full trail and never exposes env values, secrets, or credentials. Filters are exact-match and ANDed.
 - `version` (`-v`, `--version`) — print local binary `version/commit/build_time/sha256` (no socket).
 - `socket-version` — query the daemon over the socket (`{version:{}}`), pretty-print `{version,git_commit,build_time,binary_sha256,pid}`. This is the op `approval.health` probes.
 
@@ -58,8 +60,9 @@ Socket candidate chain (shared by daemon and CLI via `config.DefaultSocketPath`)
 - `cancel`: success (including idempotent duplicate cancellation) → exit 0; socket/parse/`error`-field failure (e.g. `unauthorized`, `not found`) → exit 1.
 - `status`: `completed` → exit remote code; `not_found|denied|timeout|cancelled` → exit 1; all other states (`pending|confirming|running|…`) → exit 0 after printing JSON. Socket/parse failure → exit 1.
 - `list`/`recent`: print human-readable blocks, exit 0 on success, 1 on socket/parse failure.
+- `audit`: prints pretty-printed JSON, exit 0 on success (including an empty page), 1 on socket/parse failure; bad filters → exit 2 via `usage()`.
 - `socket-version`: prints JSON, exit 0 on success, 1 on failure. Bad usage (e.g. bad `--ttl`, missing args) → exit 2 via `usage()`.
 
 ## Socket ops behind the CLI
 
-Each subcommand is one JSON-lines envelope over the unix socket, one JSON line back, fresh connection per call: run, verdict, cancel, notify, ask, ack, status, version, list, recent (10 socket ops). Daemon-only ops (telegram_info, telegram_set_config, policy_add_rule, help) have no CLI subcommand (help is available via direct socket query).
+Each subcommand is one JSON-lines envelope over the unix socket, one JSON line back, fresh connection per call: run, verdict, cancel, notify, ask, ack, status, version, list, recent, audit (11 socket ops). Daemon-only ops (telegram_info, telegram_set_config, policy_add_rule, help) have no CLI subcommand (help is available via direct socket query).

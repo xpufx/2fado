@@ -266,6 +266,25 @@ func Recent(sock string, limit int) int {
 	return 0
 }
 
+// Audit prints audit-log events matching the query. It sends one page
+// request and pretty-prints the AuditQueryResponse JSON.
+func Audit(sock string, req protocol.AuditQueryRequest) int {
+	raw, err := call(sock, protocol.ClientMessage{Audit: &req})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "2fado: "+err.Error())
+		return 1
+	}
+	var res protocol.AuditQueryResponse
+	if err := json.Unmarshal(raw, &res); err != nil {
+		fmt.Fprintln(os.Stderr, "2fado: bad reply")
+		return 1
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(res)
+	return 0
+}
+
 // SocketVersion queries the daemon for its build version over the socket.
 func SocketVersion(sock string) int {
 	raw, err := call(sock, protocol.ClientMessage{

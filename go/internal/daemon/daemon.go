@@ -352,6 +352,8 @@ func handle(svc *service.Service, c net.Conn) {
 		out, err = json.Marshal(svc.List())
 	case msg.Recent != nil:
 		out, err = json.Marshal(svc.Recent(msg.Recent.Limit))
+	case msg.Audit != nil:
+		out, err = json.Marshal(svc.Audit(*msg.Audit))
 	case msg.Status != nil:
 		out, err = json.Marshal(svc.Status(msg.Status.ID))
 	case msg.TelegramInfo != nil:

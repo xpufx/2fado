@@ -649,6 +649,12 @@ func (s Service) Recent(limit int) protocol.RecentList {
 	return protocol.RecentList{Items: items}
 }
 
+// Audit answers a bounded audit-trail query: the append-only event log
+// behind the capped Recent view. Newest-first with an opaque cursor.
+func (s Service) Audit(req protocol.AuditQueryRequest) protocol.AuditQueryResponse {
+	return s.Store.AuditQuery(req)
+}
+
 // Status answers a query for the state and outcome of a specific request ID.
 // Stored git and fd pins ride along with live drift so operators see
 // workspace and entrypoint movement; drift-blocked runs read as denied.

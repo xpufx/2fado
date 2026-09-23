@@ -1,6 +1,6 @@
 # Backend API — third-party consumer RPC reference (`approval.*`)
 
-Status: draft. This describes the contract a third-party consumer implements against the daemon socket API; op inventory source of truth is `go/internal/protocol/protocol.go` (`ClientMessage`, 14 ops: run, verdict, notify, ask, ack, cancel, list, recent, status, telegram_info, telegram_set_config, policy_add_rule, version, help).
+Status: draft. This describes the contract a third-party consumer implements against the daemon socket API; op inventory source of truth is `go/internal/protocol/protocol.go` (`ClientMessage`, 15 ops: run, verdict, notify, ask, ack, cancel, list, recent, audit, status, telegram_info, telegram_set_config, policy_add_rule, version, help).
 
 All consumer RPCs are validated on both sides. Every input carries optional `socketPath` (future `backendRef` alias — see `docs/backend-adapter.md`).
 
@@ -44,6 +44,15 @@ Privilege escalation is disabled in the default build and no escalation features
 - Output: `{items: [{id, argv, cwd, asUid, decision, by, exit, output, step?, confirmOf?, kind?, link?, summary?, question?, options?, selection?, selectionIdx?, acked?, ackBy?, authUrl?}]}`.
 - Server: sends `{recent:{limit}}`. Fail-soft: `{items:[]}`.
 - Client: polls every 5s with limit 10 (`RECENT_POLL_MS`, `RECENT_LIMIT`); History tab hides if backend lacks this capability.
+
+## `approval.audit` — audit-log history
+
+- Input: `{cursor?, limit? (int, 1–200, default 50), ev?, id?, uid?, since? (unix sec, inclusive), until? (unix sec, inclusive), socketPath?}`.
+- Output: `{items: [{ev, ts, uid?, by?, argv?, cwd?, tier?, decision?, rid?, step?, confirm_of?, as_uid?, dry?, exit?, env_dropped?, link?, summary?, question?, options?, selection?, selection_idx?, reason?}], next_cursor?}`.
+- Server: sends `{audit:{cursor,limit,ev,id,uid,since,until}}`. Newest-first, exact-match ANDed filters, bounded page. `next_cursor` is an opaque continuation token for the next older page (absent on the last page). Unlike `recent` (a capped derived view of decided petitions, max 50), `audit` reads the append-only trail directly and never carries environment values, secrets, or credentials.
+- Client: History tab can page deeper audit history instead of the capped recent list; unknown `ev` values render generically.
+
+Retention: `audit.log` is append-only and never pruned by the request-store retention sweep (`DefaultPruneTTL`, 30 days, applies to `pending/` petition records only). Audit growth is bounded by the operator's disk maintenance, not by the daemon; the query is always bounded by `limit` (default 50, max 200) so a large trail never materializes in one response. Cursors are absolute oldest-first line indexes, so they stay valid as new events append at the tail.
 
 ## `approval.status` — execution outcome
 

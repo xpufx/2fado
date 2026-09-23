@@ -1,6 +1,6 @@
 # Backend adapter — third-party contract
 
-Status: draft. Source of truth for the op inventory: `go/internal/protocol/protocol.go` (`ClientMessage`, 14 ops: run, verdict, notify, ask, ack, cancel, list, recent, status, telegram_info, telegram_set_config, policy_add_rule, version, help).
+Status: draft. Source of truth for the op inventory: `go/internal/protocol/protocol.go` (`ClientMessage`, 15 ops: run, verdict, notify, ask, ack, cancel, list, recent, audit, status, telegram_info, telegram_set_config, policy_add_rule, version, help).
 
 This page defines what a third-party backend implements so a third-party consumer can use it without the reference daemon.
 
@@ -16,7 +16,7 @@ Privilege escalation is disabled in the default build and no escalation features
 - Unix socket, JSON-lines: one JSON object + `\n` per request, one JSON line back, fresh connection per call.
 - Socket timeout 2000ms per candidate (`telegram_info` uses 8000ms); every RPC wrapped in a 5s-timeout, max-4-inflight guard.
 - Socket candidate order: per-call `socketPath` → `$TWOFADO_SOCKET` → `$FADO_SOCKET` → `$TWOFADO_RUN_DIR/2fado.sock` → `$XDG_RUNTIME_DIR/2fado/2fado.sock` → `/tmp/2fado.sock`. The daemon's canonical socket is `$XDG_RUNTIME_DIR/2fado/2fado.sock` (see docs/daemon-service.md).
-- Envelope (`protocol.ClientMessage`): exactly one field set. Third-party consumers use 9 of 14 ops (list, verdict, cancel, ack, recent, status, telegram_info, telegram_set_config, policy_add_rule — see the op table below); `run`, `notify`, `ask`, `version`, `help` are producer/CLI-only or discovery today (see `docs/backend-cli.md`).
+- Envelope (`protocol.ClientMessage`): exactly one field set. Third-party consumers use 10 of 15 ops (list, verdict, cancel, ack, recent, audit, status, telegram_info, telegram_set_config, policy_add_rule — see the op table below); `run`, `notify`, `ask`, `version`, `help` are producer/CLI-only or discovery today (see `docs/backend-cli.md`).
 
 ## Op table (consumer → backend)
 
@@ -27,6 +27,7 @@ Privilege escalation is disabled in the default build and no escalation features
 | `{cancel:{id,reason,by:"consumer"}}` | `CancelRequest{id,reason,by}` | `CancelResponse{cancelled,error}` |
 | `{ack:{id,by:"consumer"}}` | `AckSubmit{id,by}` | `AckResponse{acked}` |
 | `{recent:{limit}}` | `RecentRequest{limit}` | `RecentList{items: RecentItem{id,argv,cwd,as_uid,decision,by,exit,output,step,confirm_of,auth_url,kind,link,summary,question,options,selection,selection_idx,acked,ack_by}}` |
+| `{audit:{cursor,limit,ev,id,uid,since,until}}` | `AuditQueryRequest{cursor,limit,ev,id,uid,since,until}` | `AuditQueryResponse{items: AuditRecord{ev,ts,uid,by,argv,cwd,tier,decision,rid,step,confirm_of,as_uid,dry,exit,env_dropped,link,summary,question,options,selection,selection_idx,reason},next_cursor}` |
 | `{status:{id}}` | `StatusRequest{id}` | `StatusResponse{id,status,argv,cwd,uid,as_uid,expires_in,decision,by,exit,output,step,confirm_of,preview,auth_url,kind,link,summary,question,options,selection,selection_idx,acked,ack_by,ack_at}` |
 | `{telegram_info:{}}` | `TelegramInfoRequest{}` | `TelegramInfoResponse{configured,bot_username,chat_id,approvers,status:connected\|disconnected\|unconfigured\|error,error}` |
 | `{telegram_set_config:{bot_token,chat_id,approvers}}` | `TelegramSetConfigRequest{bot_token?,chat_id?,approvers?}` | `TelegramSetConfigResponse{success,bot_username,error}` |
@@ -52,7 +53,7 @@ MAY: `preview{resolved_binary,target_cwd,affected_count,sample_paths,risk_level,
 interface ApprovalBackend {
   kind: string; // e.g. "socket" | "third-party-id"
   capabilities: {
-    recent: boolean; statusPoll: boolean; ack: boolean; cancel: boolean;
+    recent: boolean; audit: boolean; statusPoll: boolean; ack: boolean; cancel: boolean;
     policyRules: boolean; telegram: boolean; preview: boolean; twoStep: boolean;
   };
   listPending(input: {backendRef?: string}): Promise<PendingListOutput>;
@@ -60,6 +61,7 @@ interface ApprovalBackend {
   submitCancel(input: {id: string; reason?: string}): Promise<{cancelled: boolean; error?: string}>;
   submitAck(input: {id: string}): Promise<{acked: boolean}>;
   listRecent(input: {limit?: number}): Promise<RecentListOutput>;
+  listAudit(input: {cursor?: string; limit?: number; ev?: string; id?: string; uid?: number; since?: number; until?: number}): Promise<AuditQueryOutput>;
   getStatus(input: {id: string}): Promise<StatusOutput>;
   addPolicyRule(...): ...; getTelegramInfo(...); setTelegramConfig(...);
 }
