@@ -1,0 +1,246 @@
+# Reusable issue close guard: when a closed issue event fires, verify whether
+# the closing actor matches a target identity (default: `xpufx`). If so, reset
+# the issue back to open, post a policy enforcement comment, and send an
+# out-of-band 2fado notification to the operator.
+#
+# Forgejo runner v13 permits only inputs and outputs below workflow_call. The
+# caller forwards FORGEJO_TOKEN at its job boundary; do not add a secrets block
+# here.
+
+name: Reusable issue close guard
+
+on:
+  workflow_call:
+    inputs:
+      actor:
+        description: Actor that triggered the issue close event
+        required: true
+        type: string
+      issue_number:
+        description: Issue number
+        required: true
+        type: number
+      issue_url:
+        description: HTML URL of the issue
+        required: false
+        type: string
+        default: ""
+      target_actor:
+        description: Comma-separated target actor username(s) to intercept
+        required: false
+        type: string
+        default: "xpufx"
+      twofado_socket:
+        description: Path to 2fado daemon unix socket
+        required: false
+        type: string
+        default: "/run/user/1001/2fado/2fado.sock"
+      twofado_bin:
+        description: Path or command name for 2fado binary
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  issues: write
+
+jobs:
+  guard:
+    name: Reopen ticket, comment, and dispatch 2fado notify if closed by target actor
+    runs-on: runner-local-shell # host runner label; no container
+    steps:
+      - name: Report runner diagnostics
+        if: always()
+        env:
+          RUNNER_OS: ${{ runner.os }}
+          RUNNER_ARCH: ${{ runner.arch }}
+        run: |
+          runner_host="${XP_RUNNER_HOST:-<unset>}"
+          printf 'Runner OS: %s\nRunner architecture: %s\nRunner host: %s\n' "$RUNNER_OS" "$RUNNER_ARCH" "$runner_host"
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            printf "## Runner diagnostics\n\n- OS: \`%s\`\n- Architecture: \`%s\`\n- Host: \`%s\`\n" "$RUNNER_OS" "$RUNNER_ARCH" "$runner_host" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Reopen issue, post policy comment, and notify via 2fado
+        env:
+          # Caller forwards its token under this secret name
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+          API_URL: ${{ github.api_url }}
+          SERVER_URL: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ inputs.actor }}
+          ISSUE: ${{ inputs.issue_number }}
+          ISSUE_URL: ${{ inputs.issue_url }}
+          TARGET_ACTOR: ${{ inputs.target_actor }}
+          TWOFADO_SOCKET: ${{ inputs.twofado_socket }}
+          TWOFADO_BIN: ${{ inputs.twofado_bin }}
+        run: |
+          set -eu
+
+          [ -n "$FORGEJO_TOKEN" ] || { echo "::error::caller did not forward FORGEJO_TOKEN"; exit 1; }
+
+          target="${TARGET_ACTOR:-xpufx}"
+          match=0
+          IFS=',' read -ra targets <<< "$target"
+          for t in "${targets[@]}"; do
+            trimmed="$(echo "$t" | tr -d '[:space:]')"
+            if [ -n "$trimmed" ] && [ "$ACTOR" = "$trimmed" ]; then
+              match=1
+              break
+            fi
+          done
+
+          if [ "$match" -ne 1 ]; then
+            echo "actor '$ACTOR' does not match target actor(s) '$target'; skipping"
+            exit 0
+          fi
+
+          echo "actor '$ACTOR' closed issue #${ISSUE}; evaluating guard action"
+
+          # Function to GET via curl or wget
+          api_get() {
+            if command -v curl >/dev/null 2>&1; then
+              curl -s -H "Authorization: token ${FORGEJO_TOKEN}" "$1"
+            elif command -v wget >/dev/null 2>&1; then
+              wget -q -O - --header "Authorization: token ${FORGEJO_TOKEN}" "$1"
+            else
+              echo "::error::neither curl nor wget is available"
+              exit 1
+            fi
+          }
+
+          # Check if this event belongs to a pull request
+          is_pull_request() {
+            if command -v jq >/dev/null 2>&1; then
+              printf '%s' "$1" | jq -r '.pull_request != null' 2>/dev/null | grep -q '^true$'
+            else
+              printf '%s' "$1" | grep -Eq '"pull_request"[[:space:]]*:[[:space:]]*\{'
+            fi
+          }
+
+          issue_json="$(api_get "${API_URL}/repos/${REPO}/issues/${ISSUE}")"
+          if [ -z "$issue_json" ]; then
+            echo "::error::empty response fetching issue #${ISSUE} (HTTP error or auth failure?)"
+            exit 1
+          fi
+
+          if is_pull_request "$issue_json"; then
+            echo "issue #${ISSUE} is a pull request; skipping"
+            exit 0
+          fi
+
+          # Function to PATCH issue state to open
+          api_reopen() {
+            local url="${API_URL}/repos/${REPO}/issues/${ISSUE}"
+            local payload='{"state":"open"}'
+            local auth_hdr="Authorization: token ${FORGEJO_TOKEN}"
+
+            if command -v curl >/dev/null 2>&1; then
+              local status
+              status="$(curl -s -o /dev/null -w "%{http_code}" -X PATCH -H "$auth_hdr" -H "Content-Type: application/json" -d "$payload" "$url")"
+              if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+                echo "::error::curl PATCH failed with HTTP $status"
+                return 1
+              fi
+            elif command -v python3 >/dev/null 2>&1; then
+              python3 -c '
+          import urllib.request, sys
+          req = urllib.request.Request(sys.argv[1], data=sys.argv[2].encode("utf-8"), method="PATCH")
+          req.add_header("Authorization", sys.argv[3])
+          req.add_header("Content-Type", "application/json")
+          with urllib.request.urlopen(req) as resp:
+              if resp.status < 200 or resp.status >= 300:
+                  sys.exit(1)
+          ' "$url" "$payload" "$auth_hdr"
+            else
+              echo "::error::cannot PATCH: neither curl nor python3 is available"
+              return 1
+            fi
+          }
+
+          echo "reopening issue #${ISSUE} via Forgejo API..."
+          api_reopen
+          echo "issue #${ISSUE} reopened successfully"
+
+          # -------------------------------------------------------------------------
+          # Post policy enforcement comment on the reopened issue
+          # -------------------------------------------------------------------------
+          echo "posting policy clarification comment on issue #${ISSUE}..."
+          comment_body=$(printf '> [!WARNING]\n> **Automated Reopen**: Issue #%s was closed by `@%s` and has been automatically reopened per repository governance policy.\n\n**Policy Directive**:\nAutonomous agents and orchestrators must **never** close issues directly. Upon completing implementation and local verification, agents must transition tickets to `state/2-review` or `state/3-verify` with an envelope report and await operator verification. Only the human operator closes issues upon final review (`confirmed-done`). Do not repeat this closure.' "$ISSUE" "$ACTOR")
+
+          comment_payload=""
+          if command -v jq >/dev/null 2>&1; then
+            comment_payload="$(jq -n --arg b "$comment_body" '{body: $b}')"
+          elif command -v python3 >/dev/null 2>&1; then
+            comment_payload="$(python3 -c 'import json, sys; print(json.dumps({"body": sys.argv[1]}))' "$comment_body")"
+          fi
+
+          if [ -n "$comment_payload" ]; then
+            comment_url="${API_URL}/repos/${REPO}/issues/${ISSUE}/comments"
+            auth_hdr="Authorization: token ${FORGEJO_TOKEN}"
+            if command -v curl >/dev/null 2>&1; then
+              curl -s -o /dev/null -X POST -H "$auth_hdr" -H "Content-Type: application/json" -d "$comment_payload" "$comment_url" || true
+            elif command -v wget >/dev/null 2>&1; then
+              wget -q -O /dev/null --header "$auth_hdr" --header "Content-Type: application/json" --post-data "$comment_payload" "$comment_url" || true
+            fi
+            echo "comment posted successfully on issue #${ISSUE}"
+          fi
+
+          # -------------------------------------------------------------------------
+          # Send 2fado notification to user
+          # -------------------------------------------------------------------------
+          link="${ISSUE_URL:-${SERVER_URL}/${REPO}/issues/${ISSUE}}"
+          summary="Issue #${ISSUE} reopened: closed by target actor ${ACTOR}"
+
+          # Discover 2fado binary
+          twofado_bin=""
+          if [ -n "${TWOFADO_BIN:-}" ] && [ -x "$TWOFADO_BIN" ]; then
+            twofado_bin="$TWOFADO_BIN"
+          elif command -v 2fado >/dev/null 2>&1; then
+            twofado_bin="2fado"
+          elif [ -x "./bin/2fado" ]; then
+            twofado_bin="./bin/2fado"
+          elif [ -x "$HOME/.local/bin/2fado" ]; then
+            twofado_bin="$HOME/.local/bin/2fado"
+          elif [ -x "/home/xpufx/.local/bin/2fado" ]; then
+            twofado_bin="/home/xpufx/.local/bin/2fado"
+          elif [ -x "/usr/local/bin/2fado" ]; then
+            twofado_bin="/usr/local/bin/2fado"
+          fi
+
+          echo "Dispatching 2fado notification for issue #${ISSUE}..."
+          if [ -n "$twofado_bin" ]; then
+            if [ -n "${TWOFADO_SOCKET:-}" ]; then
+              export TWOFADO_SOCKET
+            fi
+            if "$twofado_bin" notify --link "$link" --summary "$summary"; then
+              echo "2fado notification dispatched successfully via CLI ($twofado_bin)"
+            else
+              echo "::warning::2fado CLI invocation failed"
+            fi
+          else
+            # Socket fallback if CLI binary is not present
+            sock="${TWOFADO_SOCKET:-/run/user/1001/2fado/2fado.sock}"
+            if [ ! -S "$sock" ] && [ -S "/tmp/2fado.sock" ]; then
+              sock="/tmp/2fado.sock"
+            fi
+
+            if [ -S "$sock" ]; then
+              payload="$(printf '{"notify":{"link":"%s","summary":"%s"}}\n' "$link" "$summary")"
+              if command -v python3 >/dev/null 2>&1; then
+                python3 -c '
+          import socket, sys
+          s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+          s.settimeout(5.0)
+          s.connect(sys.argv[1])
+          s.sendall(sys.argv[2].encode("utf-8"))
+          reply = s.recv(4096).decode("utf-8")
+          print("2fado socket reply:", reply.strip())
+          ' "$sock" "$payload"
+                echo "2fado notification dispatched successfully via raw unix socket ($sock)"
+              else
+                echo "::warning::socket found at $sock but python3 unavailable for direct socket dispatch"
+              fi
+            else
+              echo "::warning::2fado binary and socket not found; notification skipped"
+            fi
+          fi
