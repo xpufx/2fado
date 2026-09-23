@@ -1,0 +1,165 @@
+# Reusable cross-platform build, test, package & verification workflow.
+# Executes `make clean && make test && make dist` on runner-local-shell (host runner),
+# verifies SHA256 checksums and tarball existence for all targets (linux/amd64,
+# linux/arm64, darwin/amd64, darwin/arm64), publishes workflow artifacts, and
+# optionally attaches assets to Forgejo releases.
+#
+# Forgejo runner v13 permits only inputs and outputs below workflow_call. The
+# caller forwards FORGEJO_TOKEN at its job boundary; do not add a secrets block
+# here.
+
+name: Reusable cross-platform build & verification
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Target build version override (e.g. 0.2.0)
+        required: false
+        type: string
+        default: ""
+      upload_release_assets:
+        description: Upload assets directly to Forgejo release if release_id is present
+        required: false
+        type: boolean
+        default: false
+      release_id:
+        description: Forgejo release ID for asset attachment
+        required: false
+        type: number
+        default: 0
+
+permissions:
+  contents: write
+
+jobs:
+  cross-build:
+    name: Build, test, package & verify cross-platform artifacts
+    runs-on: runner-local-shell # host runner label; no container
+    steps:
+      - name: Report runner diagnostics
+        if: always()
+        env:
+          RUNNER_OS: ${{ runner.os }}
+          RUNNER_ARCH: ${{ runner.arch }}
+        run: |
+          runner_host="${XP_RUNNER_HOST:-<unset>}"
+          printf 'Runner OS: %s\nRunner architecture: %s\nRunner host: %s\n' "$RUNNER_OS" "$RUNNER_ARCH" "$runner_host"
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            printf "## Runner diagnostics\n\n- OS: \`%s\`\n- Architecture: \`%s\`\n- Host: \`%s\`\n" "$RUNNER_OS" "$RUNNER_ARCH" "$runner_host" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify build environment
+        run: |
+          echo "Checking toolchain availability..."
+          which go || { echo "::error::go toolchain not found on host"; exit 1; }
+          go version
+          which tar || { echo "::error::tar not found on host"; exit 1; }
+          which sha256sum || { echo "::error::sha256sum not found on host"; exit 1; }
+
+      - name: Determine version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          ver="${INPUT_VERSION:-}"
+          if [ -z "$ver" ]; then
+            if [[ "${REF_NAME:-}" =~ ^v[0-9] ]]; then
+              ver="${REF_NAME#v}"
+            elif [ -n "${REF_NAME:-}" ] && [ "${REF_NAME}" != "main" ]; then
+              ver="${REF_NAME}"
+            else
+              ver="0.1.0-dev"
+            fi
+          fi
+          echo "BUILD_VERSION=$ver" >> "$GITHUB_ENV"
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "Selected build version: $ver"
+
+      - name: Clean, test, and build distribution archives
+        run: |
+          echo "Running make clean..."
+          make clean
+          echo "Running make test..."
+          make test
+          echo "Running make dist VERSION=${BUILD_VERSION}..."
+          make dist VERSION="${BUILD_VERSION}"
+
+      - name: Verify distribution archives and checksums
+        run: |
+          set -eu
+          [ -d "dist" ] || { echo "::error::dist directory not found"; exit 1; }
+          [ -f "dist/SHA256SUMS" ] || { echo "::error::dist/SHA256SUMS not found"; exit 1; }
+
+          echo "Verifying SHA256 checksums..."
+          (cd dist && sha256sum -c SHA256SUMS)
+
+          expected_targets=("linux-amd64" "linux-arm64" "darwin-amd64" "darwin-arm64")
+          for target in "${expected_targets[@]}"; do
+            tarball="dist/2fado-${BUILD_VERSION}-${target}.tar.gz"
+            if [ ! -s "$tarball" ]; then
+              echo "::error::expected release tarball $tarball missing or empty"
+              exit 1
+            fi
+            echo "Verified archive: $tarball ($(wc -c < "$tarball" | tr -d ' ') bytes)"
+          done
+
+      - name: Publish step summary
+        if: always()
+        run: |
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ] && [ -d "dist" ]; then
+            {
+              echo "## Cross-Platform Build & Verification Results"
+              echo ""
+              echo "- **Version**: \`${BUILD_VERSION}\`"
+              echo "- **Commit**: \`${{ github.sha }}\`"
+              echo ""
+              echo "### Generated Archives"
+              echo "| Filename | Size |"
+              echo "| --- | --- |"
+              for f in dist/*.tar.gz; do
+                [ -e "$f" ] || continue
+                size=$(du -h "$f" | cut -f1)
+                echo "| \`$(basename "$f")\` | $size |"
+              done
+              echo ""
+              echo "### SHA256SUMS"
+              echo '```'
+              cat dist/SHA256SUMS
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v3
+        continue-on-error: true
+        with:
+          name: 2fado-cross-dist-${{ env.BUILD_VERSION }}
+          path: dist/
+          if-no-files-found: error
+
+      - name: Attach assets to release
+        if: inputs.upload_release_assets && inputs.release_id != 0
+        env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+          API_URL: ${{ github.api_url }}
+          REPO: ${{ github.repository }}
+          RELEASE_ID: ${{ inputs.release_id }}
+        run: |
+          set -eu
+          [ -n "$FORGEJO_TOKEN" ] || { echo "::warning::FORGEJO_TOKEN not provided; skipping release asset upload"; exit 0; }
+          echo "Attaching release assets to release #${RELEASE_ID}..."
+          for f in dist/*; do
+            [ -f "$f" ] || continue
+            fname="$(basename "$f")"
+            echo "Uploading $fname to release #$RELEASE_ID..."
+            curl -s -f -X POST \
+              -H "Authorization: token ${FORGEJO_TOKEN}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@$f" \
+              "${API_URL}/repos/${REPO}/releases/${RELEASE_ID}/assets?name=${fname}" || echo "::warning::failed to upload $fname to release $RELEASE_ID"
+          done

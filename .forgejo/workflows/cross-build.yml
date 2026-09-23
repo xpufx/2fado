@@ -1,0 +1,32 @@
+# Cross-platform build & release package caller workflow.
+# Triggers on release publication, push of version tags ('v*'), or manual workflow_dispatch.
+# Delegates to reusable workflow .forgejo/workflows/reusable/cross-build.yml running on runner-local-shell.
+
+name: Cross-platform build & release package (host runner)
+
+on:
+  release:
+    types: [published]
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Target build version override (e.g. 0.2.0)'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  build:
+    name: Build & package cross-platform release artifacts
+    uses: ./.forgejo/workflows/reusable/cross-build.yml
+    with:
+      version: ${{ inputs.version || '' }}
+      upload_release_assets: ${{ github.event_name == 'release' }}
+      release_id: ${{ github.event.release.id || 0 }}
+    secrets:
+      FORGEJO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      contents: write
