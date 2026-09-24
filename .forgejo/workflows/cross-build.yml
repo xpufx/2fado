@@ -1,8 +1,8 @@
 # Cross-platform build & release package caller workflow.
 # Triggers on release publication, push of version tags ('v*'), or manual workflow_dispatch.
-# Delegates to reusable workflow .forgejo/workflows/reusable/cross-build.yml running on runner-local-shell.
+# Delegates to reusable workflow .forgejo/workflows/reusable/cross-build.yml running on ubuntu-24.04.
 
-name: Cross-platform build & release package (host runner)
+name: Cross-platform build & release package
 
 on:
   release:
@@ -29,5 +29,3 @@ jobs:
     secrets:
       FORGEJO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_RELEASE_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
-    permissions:
-      contents: write

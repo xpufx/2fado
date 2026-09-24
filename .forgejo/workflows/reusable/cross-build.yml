@@ -34,13 +34,10 @@ on:
         type: string
         default: 'xpufx/2fado'
 
-permissions:
-  contents: write
-
 jobs:
   cross-build:
     name: Build, test, package & verify cross-platform artifacts
-    runs-on: runner-local-shell # host runner label; no container
+    runs-on: ubuntu-24.04 # container with node, go, make, git, tar, sha256sum
     steps:
       - name: Report runner diagnostics
         if: always()

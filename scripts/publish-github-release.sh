@@ -86,9 +86,9 @@ if [ -z "$TOKEN" ]; then
   exit 0
 fi
 
-# Check for gh CLI
-if ! command -v gh >/dev/null 2>&1; then
-  echo "::warning::gh CLI not found in PATH; skipping GitHub release mirror."
+# Check for CLI tool or curl
+if ! command -v gh >/dev/null 2>&1 && ! command -v curl >/dev/null 2>&1; then
+  echo "::warning::Neither gh CLI nor curl found in PATH; skipping GitHub release mirror."
   exit 0
 fi
 
@@ -123,8 +123,6 @@ if [ ! -d "$ARTIFACT_DIR" ]; then
   exit 1
 fi
 
-export GH_TOKEN="$TOKEN"
-
 shopt -s nullglob
 FILES=("$ARTIFACT_DIR"/2fado-*.tar.gz)
 if [ -f "$ARTIFACT_DIR/SHA256SUMS" ]; then
@@ -143,18 +141,83 @@ for f in "${FILES[@]}"; do
   echo "    - $(basename "$f") ($(wc -c < "$f" | tr -d ' ') bytes)"
 done
 
-if gh release view "$RELEASE_TAG" --repo "$TARGET_REPO" >/dev/null 2>&1; then
-  echo "==> Release ${RELEASE_TAG} exists in ${TARGET_REPO}; uploading assets..."
-  gh release upload "$RELEASE_TAG" "${FILES[@]}" --repo "$TARGET_REPO" --clobber
-else
-  echo "==> Creating release ${RELEASE_TAG} in ${TARGET_REPO} and uploading assets..."
-  if ! gh release create "$RELEASE_TAG" "${FILES[@]}" --repo "$TARGET_REPO" --title "$RELEASE_TAG" --generate-notes; then
-    echo "==> Retrying release creation with fallback title/notes..."
-    if ! gh release create "$RELEASE_TAG" "${FILES[@]}" --repo "$TARGET_REPO" --title "$RELEASE_TAG" --notes "Release $RELEASE_TAG"; then
-      echo "==> Release creation failed or already exists; trying gh release upload..."
-      gh release upload "$RELEASE_TAG" "${FILES[@]}" --repo "$TARGET_REPO" --clobber
+if command -v gh >/dev/null 2>&1; then
+  export GH_TOKEN="$TOKEN"
+  if gh release view "$RELEASE_TAG" --repo "$TARGET_REPO" >/dev/null 2>&1; then
+    echo "==> Release ${RELEASE_TAG} exists in ${TARGET_REPO}; uploading assets..."
+    gh release upload "$RELEASE_TAG" "${FILES[@]}" --repo "$TARGET_REPO" --clobber
+  else
+    echo "==> Creating release ${RELEASE_TAG} in ${TARGET_REPO} and uploading assets..."
+    if ! gh release create "$RELEASE_TAG" "${FILES[@]}" --repo "$TARGET_REPO" --title "$RELEASE_TAG" --generate-notes; then
+      echo "==> Retrying release creation with fallback title/notes..."
+      if ! gh release create "$RELEASE_TAG" "${FILES[@]}" --repo "$TARGET_REPO" --title "$RELEASE_TAG" --notes "Release $RELEASE_TAG"; then
+        echo "==> Release creation failed or already exists; trying gh release upload..."
+        gh release upload "$RELEASE_TAG" "${FILES[@]}" --repo "$TARGET_REPO" --clobber
+      fi
     fi
   fi
+elif command -v curl >/dev/null 2>&1; then
+  echo "==> gh CLI not found; falling back to GitHub REST API via curl..."
+  AUTH_HEADER="Authorization: Bearer ${TOKEN}"
+  API_HEADER="Accept: application/vnd.github+json"
+  API_VERSION_HEADER="X-GitHub-Api-Version: 2022-11-28"
+
+  # Query for existing release by tag
+  RELEASE_RESP=$(curl -s -H "$AUTH_HEADER" -H "$API_HEADER" -H "$API_VERSION_HEADER" "https://api.github.com/repos/${TARGET_REPO}/releases/tags/${RELEASE_TAG}")
+  RELEASE_ID=""
+  if command -v jq >/dev/null 2>&1; then
+    RELEASE_ID=$(echo "$RELEASE_RESP" | jq -r '.id // empty' 2>/dev/null || true)
+  elif command -v python3 >/dev/null 2>&1; then
+    RELEASE_ID=$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('id', ''))" "$RELEASE_RESP" 2>/dev/null || true)
+  fi
+
+  if [ -z "$RELEASE_ID" ] || [ "$RELEASE_ID" = "null" ]; then
+    echo "==> Release ${RELEASE_TAG} not found in ${TARGET_REPO}; creating..."
+    PAYLOAD=$(printf '{"tag_name":"%s","name":"%s","generate_release_notes":true}' "$RELEASE_TAG" "$RELEASE_TAG")
+    CREATE_RESP=$(curl -s -X POST -H "$AUTH_HEADER" -H "$API_HEADER" -H "$API_VERSION_HEADER" -H "Content-Type: application/json" -d "$PAYLOAD" "https://api.github.com/repos/${TARGET_REPO}/releases")
+    if command -v jq >/dev/null 2>&1; then
+      RELEASE_ID=$(echo "$CREATE_RESP" | jq -r '.id // empty' 2>/dev/null || true)
+    elif command -v python3 >/dev/null 2>&1; then
+      RELEASE_ID=$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('id', ''))" "$CREATE_RESP" 2>/dev/null || true)
+    fi
+  fi
+
+  if [ -z "$RELEASE_ID" ] || [ "$RELEASE_ID" = "null" ]; then
+    echo "::error::Failed to find or create GitHub release ${RELEASE_TAG} for ${TARGET_REPO}." >&2
+    exit 1
+  fi
+
+  echo "==> Uploading assets to release ID ${RELEASE_ID}..."
+  ASSETS_RESP=$(curl -s -H "$AUTH_HEADER" -H "$API_HEADER" -H "$API_VERSION_HEADER" "https://api.github.com/repos/${TARGET_REPO}/releases/${RELEASE_ID}/assets")
+
+  for f in "${FILES[@]}"; do
+    FNAME="$(basename "$f")"
+    EXISTING_ID=""
+    if command -v jq >/dev/null 2>&1; then
+      EXISTING_ID=$(echo "$ASSETS_RESP" | jq -r ".[] | select(.name==\"$FNAME\") | .id" 2>/dev/null || true)
+    elif command -v python3 >/dev/null 2>&1; then
+      EXISTING_ID=$(python3 -c "import json, sys; assets=json.loads(sys.argv[1]); [print(a['id']) for a in assets if a.get('name')==sys.argv[2]]" "$ASSETS_RESP" "$FNAME" 2>/dev/null || true)
+    fi
+
+    if [ -n "$EXISTING_ID" ] && [ "$EXISTING_ID" != "null" ]; then
+      echo "    Overwriting existing asset ${FNAME} (id ${EXISTING_ID})..."
+      curl -s -X DELETE -H "$AUTH_HEADER" -H "$API_HEADER" -H "$API_VERSION_HEADER" "https://api.github.com/repos/${TARGET_REPO}/releases/assets/${EXISTING_ID}" >/dev/null 2>&1 || true
+    fi
+
+    echo "    Uploading ${FNAME}..."
+    UPLOAD_URL="https://uploads.github.com/repos/${TARGET_REPO}/releases/${RELEASE_ID}/assets?name=${FNAME}"
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+      -H "$AUTH_HEADER" \
+      -H "$API_VERSION_HEADER" \
+      -H "Content-Type: application/octet-stream" \
+      --data-binary "@$f" \
+      "$UPLOAD_URL")
+    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+      echo "::error::Failed to upload ${FNAME} to GitHub release (HTTP ${HTTP_CODE})" >&2
+      exit 1
+    fi
+    echo "    Uploaded ${FNAME} successfully."
+  done
 fi
 
 echo "==> Successfully mirrored release artifacts to https://github.com/${TARGET_REPO}/releases/tag/${RELEASE_TAG}"
