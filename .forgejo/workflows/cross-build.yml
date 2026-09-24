@@ -28,5 +28,6 @@ jobs:
       release_id: ${{ github.event.release.id || 0 }}
     secrets:
       FORGEJO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_RELEASE_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
     permissions:
       contents: write

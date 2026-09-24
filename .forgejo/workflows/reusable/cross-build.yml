@@ -28,6 +28,11 @@ on:
         required: false
         type: number
         default: 0
+      github_repo:
+        description: Target GitHub repository for release mirroring
+        required: false
+        type: string
+        default: 'xpufx/2fado'
 
 permissions:
   contents: write
@@ -163,3 +168,10 @@ jobs:
               --data-binary "@$f" \
               "${API_URL}/repos/${REPO}/releases/${RELEASE_ID}/assets?name=${fname}" || echo "::warning::failed to upload $fname to release $RELEASE_ID"
           done
+
+      - name: Mirror release artifacts to GitHub
+        if: inputs.upload_release_assets
+        env:
+          GH_RELEASE_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          scripts/publish-github-release.sh --repo "${{ inputs.github_repo }}" --tag "v${BUILD_VERSION}" --dist-dir "dist"
