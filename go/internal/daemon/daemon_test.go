@@ -312,6 +312,154 @@ func TestDaemonAskSocketRoundTrip(t *testing.T) {
 	}
 }
 
+// TestDaemonSelectSocketRoundTrip exercises the consumer select op on the unix socket
+// for interactive ask petitions and verifies unblocking, validation, and responses.
+func TestDaemonSelectSocketRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	sockPath := filepath.Join(tmpDir, "select.sock")
+	t.Setenv("TWOFADO_USER_CONFIG", filepath.Join(tmpDir, "config.json"))
+
+	cfg := config.Conf{
+		Socket:   sockPath,
+		StateDir: tmpDir,
+		Timeout:  5,
+		Policy:   filepath.Join(tmpDir, "policy.json"),
+	}
+	svc := service.New(cfg)
+	go func() {
+		_ = Serve(svc)
+	}()
+	for i := 0; i < 50; i++ {
+		if conn, err := net.Dial("unix", sockPath); err == nil {
+			conn.Close()
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	sendAndRecv := func(req string) []byte {
+		c, err := net.Dial("unix", sockPath)
+		if err != nil {
+			t.Fatalf("dial failed: %v", err)
+		}
+		defer c.Close()
+		if _, err := c.Write([]byte(req + "\n")); err != nil {
+			t.Fatalf("write failed: %v", err)
+		}
+		line, err := bufio.NewReader(c).ReadBytes('\n')
+		if err != nil {
+			t.Fatalf("read failed: %v", err)
+		}
+		return line
+	}
+
+	type reply struct {
+		raw []byte
+		err error
+	}
+	got := make(chan reply, 1)
+	go func() {
+		c, err := net.Dial("unix", sockPath)
+		if err != nil {
+			got <- reply{err: err}
+			return
+		}
+		defer c.Close()
+		req := `{"ask":{"question":"favorite language?","options":["rust","go","python"],"ttl_seconds":30}}`
+		if _, err := c.Write([]byte(req + "\n")); err != nil {
+			got <- reply{err: err}
+			return
+		}
+		line, err := bufio.NewReader(c).ReadBytes('\n')
+		got <- reply{raw: line, err: err}
+	}()
+
+	rid := ""
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && rid == "" {
+		if items := svc.List().Items; len(items) == 1 && items[0].Kind == "ask" {
+			rid = items[0].ID
+		} else {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if rid == "" {
+		t.Fatal("ask petition never appeared in pending list")
+	}
+
+	// 1. Validation error: missing ID
+	invalidReq1 := `{"select":{"id":"","selection":"go","selection_idx":1}}`
+	raw := sendAndRecv(invalidReq1)
+	var selResp protocol.SelectResponse
+	if err := json.Unmarshal(raw, &selResp); err != nil {
+		t.Fatalf("unmarshal error: %v (%s)", err, raw)
+	}
+	if selResp.Selected || selResp.Error == "" {
+		t.Fatalf("expected error for missing id, got: %+v", selResp)
+	}
+
+	// 2. Validation error: missing selection
+	invalidReq2 := fmt.Sprintf(`{"select":{"id":%q,"selection":"","selection_idx":1}}`, rid)
+	raw = sendAndRecv(invalidReq2)
+	selResp = protocol.SelectResponse{}
+	if err := json.Unmarshal(raw, &selResp); err != nil {
+		t.Fatalf("unmarshal error: %v (%s)", err, raw)
+	}
+	if selResp.Selected || selResp.Error == "" {
+		t.Fatalf("expected error for missing selection, got: %+v", selResp)
+	}
+
+	// 3. Selection on nonexistent ID
+	invalidReq3 := `{"select":{"id":"nonexistent","selection":"go","selection_idx":1}}`
+	raw = sendAndRecv(invalidReq3)
+	selResp = protocol.SelectResponse{}
+	if err := json.Unmarshal(raw, &selResp); err != nil {
+		t.Fatalf("unmarshal error: %v (%s)", err, raw)
+	}
+	if selResp.Selected || selResp.Error == "" {
+		t.Fatalf("expected error for nonexistent petition, got: %+v", selResp)
+	}
+
+	// 4. Valid selection over socket
+	validReq := fmt.Sprintf(`{"select":{"id":%q,"selection":"go","selection_idx":1}}`, rid)
+	raw = sendAndRecv(validReq)
+	selResp = protocol.SelectResponse{}
+	if err := json.Unmarshal(raw, &selResp); err != nil {
+		t.Fatalf("unmarshal error: %v (%s)", err, raw)
+	}
+	if !selResp.Selected || selResp.Error != "" {
+		t.Fatalf("expected selection success, got: %+v", selResp)
+	}
+
+	// 5. Verify the blocked ask request returns with selected status
+	select {
+	case r := <-got:
+		if r.err != nil {
+			t.Fatalf("socket read: %v", r.err)
+		}
+		var askRes protocol.AskResult
+		if err := json.Unmarshal(r.raw, &askRes); err != nil {
+			t.Fatalf("unmarshal ask result: %v (%s)", err, r.raw)
+		}
+		if askRes.Status != "selected" || askRes.Selection != "go" || askRes.SelectionIdx != 1 || askRes.ID != rid {
+			t.Fatalf("unexpected ask result: %+v", askRes)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("ask socket call did not unblock after socket select")
+	}
+
+	// 6. Duplicate selection rejected (first-wins)
+	dupReq := fmt.Sprintf(`{"select":{"id":%q,"selection":"rust","selection_idx":0}}`, rid)
+	raw = sendAndRecv(dupReq)
+	selResp = protocol.SelectResponse{}
+	if err := json.Unmarshal(raw, &selResp); err != nil {
+		t.Fatalf("unmarshal error: %v (%s)", err, raw)
+	}
+	if selResp.Selected || selResp.Error == "" {
+		t.Fatalf("duplicate selection should be rejected, got: %+v", selResp)
+	}
+}
+
 // TestDaemonCancelSocketRoundTrip exercises the cancel op end to end over the
 // unix socket for pending exec petitions and ask petitions.
 func TestDaemonCancelSocketRoundTrip(t *testing.T) {

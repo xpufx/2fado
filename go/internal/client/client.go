@@ -146,6 +146,47 @@ func Ask(sock, question string, options []string, link string, ttlSeconds int64,
 	return 1
 }
 
+// Select submits an option choice for an ask petition id.
+func Select(sock, id, selection string, selectionIdx int) int {
+	raw, err := call(sock, protocol.ClientMessage{
+		Select: &protocol.SelectRequest{
+			ID:           id,
+			Selection:    selection,
+			SelectionIdx: selectionIdx,
+		},
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "2fado: "+err.Error())
+		return 1
+	}
+	var res protocol.SelectResponse
+	if err := json.Unmarshal(raw, &res); err != nil {
+		fmt.Fprintln(os.Stderr, "2fado: bad reply")
+		return 1
+	}
+	if res.Error != "" {
+		fmt.Fprintf(os.Stderr, "2fado: select rejected (%s)\n", res.Error)
+		return 1
+	}
+	fmt.Printf("{selected: %v}\n", res.Selected)
+	return 0
+}
+
+// QueryStatus queries the state of a petition over the socket without printing.
+func QueryStatus(sock, id string) (*protocol.StatusResponse, error) {
+	raw, err := call(sock, protocol.ClientMessage{
+		Status: &protocol.StatusRequest{ID: id},
+	})
+	if err != nil {
+		return nil, err
+	}
+	var res protocol.StatusResponse
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
 // Ack submits an acknowledgement for a notify petition id.
 func Ack(sock, id string) int {
 	raw, err := call(sock, protocol.ClientMessage{

@@ -45,6 +45,7 @@ type ClientMessage struct {
 	Verdict           *VerdictSubmit            `json:"verdict,omitempty"`
 	Notify            *NotifyRequest            `json:"notify,omitempty"`
 	Ask               *AskRequest               `json:"ask,omitempty"`
+	Select            *SelectRequest            `json:"select,omitempty"`
 	Ack               *AckSubmit                `json:"ack,omitempty"`
 	Cancel            *CancelRequest            `json:"cancel,omitempty"`
 	List              *ListRequest              `json:"list,omitempty"`
@@ -57,6 +58,9 @@ type ClientMessage struct {
 	Version           *VersionRequest           `json:"version,omitempty"`
 	Help              *HelpRequest              `json:"help,omitempty"`
 }
+
+// Message is an alias for ClientMessage for backwards and schema compatibility.
+type Message = ClientMessage
 
 // CancelRequest asks the daemon to cancel a pending, confirming, or
 // waiting ask petition. ID identifies the petition; Reason explains why;
@@ -125,6 +129,21 @@ type AskResult struct {
 	SelectionIdx int    `json:"selection_idx,omitempty"`
 	By           string `json:"by,omitempty"`
 	Reason       string `json:"reason,omitempty"`
+}
+
+// SelectRequest submits an option choice for an interactive ask petition.
+// ID identifies the petition; Selection is the verbatim option text;
+// SelectionIdx is the 0-based option index in the petition's option list.
+type SelectRequest struct {
+	ID           string `json:"id"`
+	Selection    string `json:"selection"`
+	SelectionIdx int    `json:"selection_idx,omitempty"`
+}
+
+// SelectResponse answers a SelectRequest.
+type SelectResponse struct {
+	Selected bool   `json:"selected"`
+	Error    string `json:"error,omitempty"`
 }
 
 type VersionRequest struct{}
@@ -549,6 +568,7 @@ var responseTypes = map[string]reflect.Type{
 	"verdict":             reflect.TypeFor[VerdictAck](),
 	"notify":              reflect.TypeFor[RunResult](),
 	"ask":                 reflect.TypeFor[AskResult](),
+	"select":              reflect.TypeFor[SelectResponse](),
 	"ack":                 reflect.TypeFor[AckResponse](),
 	"list":                reflect.TypeFor[PendingList](),
 	"recent":              reflect.TypeFor[RecentList](),

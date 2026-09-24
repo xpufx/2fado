@@ -331,6 +331,24 @@ func handle(svc *service.Service, c net.Conn) {
 		}()
 		res := svc.AskWithCancel(*msg.Ask, uid, disconnect)
 		out, err = json.Marshal(res)
+	case msg.Select != nil:
+		id := strings.TrimSpace(msg.Select.ID)
+		selection := strings.TrimSpace(msg.Select.Selection)
+		if id == "" || selection == "" {
+			out, err = json.Marshal(protocol.SelectResponse{
+				Selected: false,
+				Error:    "missing id or selection",
+			})
+		} else if !svc.Store.Select(id, selection, msg.Select.SelectionIdx, fmt.Sprintf("socket:%d", uid)) {
+			out, err = json.Marshal(protocol.SelectResponse{
+				Selected: false,
+				Error:    "selection rejected",
+			})
+		} else {
+			out, err = json.Marshal(protocol.SelectResponse{
+				Selected: true,
+			})
+		}
 	case msg.Ack != nil:
 		ack := svc.Ack(*msg.Ack, uid)
 		out, err = json.Marshal(ack)

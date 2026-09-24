@@ -1,6 +1,6 @@
 # Backend adapter — third-party contract
 
-Status: draft. Source of truth for the op inventory: `go/internal/protocol/protocol.go` (`ClientMessage`, 15 ops: run, verdict, notify, ask, ack, cancel, list, recent, audit, status, telegram_info, telegram_set_config, policy_add_rule, version, help).
+Status: draft. Source of truth for the op inventory: `go/internal/protocol/protocol.go` (`ClientMessage`, 16 ops: run, verdict, notify, ask, select, ack, cancel, list, recent, audit, status, telegram_info, telegram_set_config, policy_add_rule, version, help).
 
 This page defines what a third-party backend implements so a third-party consumer can use it without the reference daemon.
 
@@ -16,7 +16,7 @@ Privilege escalation is disabled in the default build and no escalation features
 - Unix socket, JSON-lines: one JSON object + `\n` per request, one JSON line back, fresh connection per call.
 - Socket timeout 2000ms per candidate (`telegram_info` uses 8000ms); every RPC wrapped in a 5s-timeout, max-4-inflight guard.
 - Socket candidate order: per-call `socketPath` → `$TWOFADO_SOCKET` → `$FADO_SOCKET` → `$TWOFADO_RUN_DIR/2fado.sock` → `$XDG_RUNTIME_DIR/2fado/2fado.sock` → `/tmp/2fado.sock`. The daemon's canonical socket is `$XDG_RUNTIME_DIR/2fado/2fado.sock` (see docs/daemon-service.md).
-- Envelope (`protocol.ClientMessage`): exactly one field set. Third-party consumers use 10 of 15 ops (list, verdict, cancel, ack, recent, audit, status, telegram_info, telegram_set_config, policy_add_rule — see the op table below); `run`, `notify`, `ask`, `version`, `help` are producer/CLI-only or discovery today (see `docs/backend-cli.md`).
+- Envelope (`protocol.ClientMessage`): exactly one field set. Third-party consumers use 11 of 16 ops (list, verdict, select, cancel, ack, recent, audit, status, telegram_info, telegram_set_config, policy_add_rule — see the op table below); `run`, `notify`, `ask`, `version`, `help` are producer/CLI-only or discovery today (see `docs/backend-cli.md`).
 
 ## Op table (consumer → backend)
 
@@ -24,6 +24,7 @@ Privilege escalation is disabled in the default build and no escalation features
 |---|---|---|
 | `{list:{}}` | `ListRequest{}` | `PendingList{items: PendingItem{id,argv,uid,as_uid,cwd,expires_in,step,confirm_of,preview,auth_url,kind,link,summary,question,options,selection,selection_idx,acked,ack_by}}` |
 | `{verdict:{id,decision,by:"consumer"}}` | `VerdictSubmit{id,decision:approve\|deny,by}` | `VerdictAck{recorded}` |
+| `{select:{id,selection,selection_idx}}` | `SelectRequest{id,selection,selection_idx?}` | `SelectResponse{selected,error}` |
 | `{cancel:{id,reason,by:"consumer"}}` | `CancelRequest{id,reason,by}` | `CancelResponse{cancelled,error}` |
 | `{ack:{id,by:"consumer"}}` | `AckSubmit{id,by}` | `AckResponse{acked}` |
 | `{recent:{limit}}` | `RecentRequest{limit}` | `RecentList{items: RecentItem{id,argv,cwd,as_uid,decision,by,exit,output,step,confirm_of,auth_url,kind,link,summary,question,options,selection,selection_idx,acked,ack_by}}` |

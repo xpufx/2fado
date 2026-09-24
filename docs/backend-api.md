@@ -1,6 +1,6 @@
 # Backend API — third-party consumer RPC reference (`approval.*`)
 
-Status: draft. This describes the contract a third-party consumer implements against the daemon socket API; op inventory source of truth is `go/internal/protocol/protocol.go` (`ClientMessage`, 15 ops: run, verdict, notify, ask, ack, cancel, list, recent, audit, status, telegram_info, telegram_set_config, policy_add_rule, version, help).
+Status: draft. This describes the contract a third-party consumer implements against the daemon socket API; op inventory source of truth is `go/internal/protocol/protocol.go` (`ClientMessage`, 16 ops: run, verdict, notify, ask, select, ack, cancel, list, recent, audit, status, telegram_info, telegram_set_config, policy_add_rule, version, help).
 
 All consumer RPCs are validated on both sides. Every input carries optional `socketPath` (future `backendRef` alias — see `docs/backend-adapter.md`).
 
@@ -25,6 +25,12 @@ Privilege escalation is disabled in the default build and no escalation features
 - Output: `{recorded}`.
 - Server: sends `{verdict:{id,decision,by:"consumer"}}`; returns `{recorded: raw.recorded === true}`. Missing input → `{recorded:false}`. Fail-soft: `{recorded:false}` + `log.warn`.
 - `by` is attribution only, never authority (see below).
+
+## `approval.select` — option selection for interactive ask petitions
+
+- Input: `{id (min 1), selection (string), selectionIdx?: number, socketPath?}`.
+- Output: `{selected: boolean, error?: string}`.
+- Server: sends `{select:{id,selection,selection_idx}}`. Records chosen option for an active `kind="ask"` petition via atomic store write, unblocking the waiting `ask` caller immediately. First selection wins. Missing input → `{selected:false, error:"missing id or selection"}`. Rejections/already selected → `{selected:false, error:"selection rejected"}`.
 
 ## `approval.cancel` — explicit cancellation
 

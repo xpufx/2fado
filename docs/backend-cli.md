@@ -1,6 +1,6 @@
 # Backend CLI — parity surface for third parties
 
-Status: draft. Daemon-side refs: `go/cmd/2fado/main.go` (subcommands, usage, env), `go/internal/client/client.go` (socket ops, exit codes), `go/internal/protocol/protocol.go` (envelope, request shapes — source of truth, `ClientMessage` 15 ops).
+Status: draft. Daemon-side refs: `go/cmd/2fado/main.go` (subcommands, usage, env), `go/internal/client/client.go` (socket ops, exit codes), `go/internal/protocol/protocol.go` (envelope, request shapes — source of truth, `ClientMessage` 16 ops).
 
 Third parties should mirror this surface for operator parity. Producer-side ops (`run`/`notify`/`ask`) vs consumer-side ops (list/verdict/status) — whether both are required is an open question (see `docs/backend-adapter.md`).
 
@@ -15,6 +15,7 @@ Privilege escalation is disabled in the default build and no escalation features
 
 ```
 2fado daemon | 2fado run -- <argv...> | 2fado approve|deny <id>
+  | 2fado select <id> [--index N | --choice text]
   | 2fado cancel <id> [--reason <text>]
   | 2fado notify --link <url> --summary <text> [--ttl <dur>]
   | 2fado ask --question <q> --option <o> [--option <o>...] [--link <url>] [--ttl <dur>]
@@ -26,6 +27,7 @@ Privilege escalation is disabled in the default build and no escalation features
 - `daemon` — run the unprivileged approval daemon service. Config path via `TWOFADO_CONF`/`FADO_CONF`/`2FADO_CONF`, default `/etc/2fado/2fado.conf`.
 - `run -- <argv...> [--detach|-d|--async]` — petition to execute. Ships `RunRequest{argv,cwd,env,detach?}` as `{run:{...}}`. Without `--detach`, a `pending` answer prints `request submitted, waiting for approval (id: …)` to stderr and exits 1; with `--detach`, prints `request submitted (id: …). Detached. Use '2fado status <id>'…` and exits 0.
 - `approve|deny <id>` — local verdict (PoC; production: SSO-bound UI). Sends `{verdict:{id,decision}}`, prints `{recorded: …}`. Rejected verdicts print `verdict rejected (…)` to stderr, exit 1.
+- `select <id> [--index N | --choice text]` — choose an option for an interactive `kind="ask"` petition. Sends `{select:{id,selection,selection_idx}}`. If `--index` is given without `--choice` (or vice versa), the counterpart is resolved against petition options via daemon status. Prints `{selected: true}` and exits 0 on success; rejects print `select rejected (…)`, exit 1.
 - `cancel <id> [--reason <text>]` — cancel a pending, confirming, or waiting ask petition safely and idempotently. Admins or the original petition creator UID may cancel. Process groups are resumed immediately, Telegram/Paseo cards are closed, and cancellation reason is audited. Sends `{cancel:{id,reason,by:"cli"}}`, prints `{cancelled: true}`. Rejections print `cancel rejected (…)`, exit 1.
 - `notify --link <url> --summary <text> [--ttl <dur>]` — create a no-exec notify-only petition (human-presence step: 2FA link, staged approval, FYI+ack). Sends `{notify:{link,summary,ttl_seconds?}}` (`--ttl` parsed as Go duration, e.g. `30m`, `2h`, `24h`; `0` = default long TTL). Prints `notify submitted (id: …)`; rejects print `notify rejected (…)`.
 - `ask --question <q> --option <o> [--option <o>...] [--link <url>] [--ttl <dur>] [--multi-select] [--allow-write-in]` — create an interactive choice question petition. Sends `{ask:{question,options,link?,ttl_seconds?,multi_select?,allow_write_in?}}` (requires at least two options). Blocks until selection lands or TTL expires. Prints chosen option to stdout and exits 0 on selection, 2 on timeout, 1 on rejection/transport error. Note (#74): `--multi-select` and `--allow-write-in` flags are persisted in protocol/store for compatibility; interactive single-choice resolution is active in current reference daemon builds.
@@ -57,6 +59,7 @@ Socket candidate chain (shared by daemon and CLI via `config.DefaultSocketPath`)
 - `run`: `allowed` → relay `res.Output` to stdout, exit remote code; `pending` without detach → exit 1; `pending` with detach → exit 0; `denied` → `denied (…)` on stderr, exit 1. Socket/parse failure → exit 1.
 - `notify`: `pending` → exit 0; rejected → exit 1. `ack`/`approve|deny`: success (even `recorded/acked: false`) → exit 0; socket/parse/`error`-field failure → exit 1.
 - `ask`: `selected` → exit 0 (chosen option printed to stdout); `timeout` → exit 2; rejected/transport error → exit 1.
+- `select`: success → exit 0; socket/parse/`error`-field failure → exit 1.
 - `cancel`: success (including idempotent duplicate cancellation) → exit 0; socket/parse/`error`-field failure (e.g. `unauthorized`, `not found`) → exit 1.
 - `status`: `completed` → exit remote code; `not_found|denied|timeout|cancelled` → exit 1; all other states (`pending|confirming|running|…`) → exit 0 after printing JSON. Socket/parse failure → exit 1.
 - `list`/`recent`: print human-readable blocks, exit 0 on success, 1 on socket/parse failure.
@@ -65,4 +68,4 @@ Socket candidate chain (shared by daemon and CLI via `config.DefaultSocketPath`)
 
 ## Socket ops behind the CLI
 
-Each subcommand is one JSON-lines envelope over the unix socket, one JSON line back, fresh connection per call: run, verdict, cancel, notify, ask, ack, status, version, list, recent, audit (11 socket ops). Daemon-only ops (telegram_info, telegram_set_config, policy_add_rule, help) have no CLI subcommand (help is available via direct socket query).
+Each subcommand is one JSON-lines envelope over the unix socket, one JSON line back, fresh connection per call: run, verdict, cancel, notify, ask, select, ack, status, version, list, recent, audit (12 socket ops). Daemon-only ops (telegram_info, telegram_set_config, policy_add_rule, help) have no CLI subcommand (help is available via direct socket query).

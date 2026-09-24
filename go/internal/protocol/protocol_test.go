@@ -11,9 +11,9 @@ import (
 )
 
 // TestClientMessageOperationInventory verifies that ClientMessage defines exactly
-// 15 operations including ask, cancel, and audit, that OpKeys() matches, and that all ops describe cleanly.
+// 16 operations including ask, select, cancel, and audit, that OpKeys() matches, and that all ops describe cleanly.
 func TestClientMessageOperationInventory(t *testing.T) {
-	const expectedOpCount = 15
+	const expectedOpCount = 16
 	keys := protocol.OpKeys()
 	if len(keys) != expectedOpCount {
 		t.Fatalf("expected %d operations in OpKeys(), got %d: %v", expectedOpCount, len(keys), keys)
@@ -25,11 +25,15 @@ func TestClientMessageOperationInventory(t *testing.T) {
 	}
 
 	hasAsk := false
+	hasSelect := false
 	hasCancel := false
 	hasAudit := false
 	for _, k := range keys {
 		if k == "ask" {
 			hasAsk = true
+		}
+		if k == "select" {
+			hasSelect = true
 		}
 		if k == "cancel" {
 			hasCancel = true
@@ -40,6 +44,9 @@ func TestClientMessageOperationInventory(t *testing.T) {
 	}
 	if !hasAsk {
 		t.Fatalf("expected 'ask' operation in OpKeys(), found %v", keys)
+	}
+	if !hasSelect {
+		t.Fatalf("expected 'select' operation in OpKeys(), found %v", keys)
 	}
 	if !hasCancel {
 		t.Fatalf("expected 'cancel' operation in OpKeys(), found %v", keys)
@@ -62,6 +69,14 @@ func TestClientMessageOperationInventory(t *testing.T) {
 	}
 	if askOps[0].Request != "AskRequest" || askOps[0].Response != "AskResult" {
 		t.Fatalf("unexpected shapes for ask op: req=%s, resp=%s", askOps[0].Request, askOps[0].Response)
+	}
+
+	selectOps, ok := protocol.Describe("select")
+	if !ok || len(selectOps) != 1 {
+		t.Fatalf("protocol.Describe(\"select\") failed or returned unexpected count: %v", selectOps)
+	}
+	if selectOps[0].Request != "SelectRequest" || selectOps[0].Response != "SelectResponse" {
+		t.Fatalf("unexpected shapes for select op: req=%s, resp=%s", selectOps[0].Request, selectOps[0].Response)
 	}
 
 	cancelOps, ok := protocol.Describe("cancel")
@@ -120,20 +135,21 @@ func TestDocsConsistency(t *testing.T) {
 		content := string(contentBytes)
 		relPath, _ := filepath.Rel(root, path)
 
-		// 1. Ensure no stale "12 op", "13 op", or "14 op" references exist.
+		// 1. Ensure no stale "12 op", "13 op", "14 op", or "15 op" references exist.
 		if strings.Contains(content, "12 op") || strings.Contains(content, "12 ops") || strings.Contains(content, "8 of 12") ||
 			strings.Contains(content, "13 op") || strings.Contains(content, "13 ops") || strings.Contains(content, "8 of 13") ||
-			strings.Contains(content, "14 op") || strings.Contains(content, "14 ops") || strings.Contains(content, "9 of 14") {
-			t.Errorf("%s still contains stale '12 op', '13 op', or '14 op' reference", relPath)
+			strings.Contains(content, "14 op") || strings.Contains(content, "14 ops") || strings.Contains(content, "9 of 14") ||
+			strings.Contains(content, "15 op") || strings.Contains(content, "15 ops") || strings.Contains(content, "10 of 15") {
+			t.Errorf("%s still contains stale '12 op', '13 op', '14 op', or '15 op' reference", relPath)
 		}
-		if !strings.Contains(content, "15 ops") {
-			t.Errorf("%s does not reference '15 ops'", relPath)
+		if !strings.Contains(content, "16 ops") {
+			t.Errorf("%s does not reference '16 ops'", relPath)
 		}
 	}
 
 	keys := protocol.OpKeys()
 
-	// Check backend-api.md and backend-adapter.md inventory lines contain all 15 keys.
+	// Check backend-api.md and backend-adapter.md inventory lines contain all 16 keys.
 	for _, docName := range []string{"backend-api.md", "backend-adapter.md"} {
 		contentBytes, err := os.ReadFile(filepath.Join(root, "docs", docName))
 		if err != nil {
@@ -157,6 +173,9 @@ func TestDocsConsistency(t *testing.T) {
 	if !strings.Contains(cliDoc, "2fado ask --question") {
 		t.Errorf("backend-cli.md missing '2fado ask --question' subcommand documentation")
 	}
+	if !strings.Contains(cliDoc, "2fado select <id>") {
+		t.Errorf("backend-cli.md missing '2fado select <id>' subcommand documentation")
+	}
 	if !strings.Contains(cliDoc, "2fado cancel <id>") {
 		t.Errorf("backend-cli.md missing '2fado cancel <id>' subcommand documentation")
 	}
@@ -166,14 +185,17 @@ func TestDocsConsistency(t *testing.T) {
 	if !strings.Contains(cliDoc, "- `ask`:") {
 		t.Errorf("backend-cli.md missing exit-code convention for `ask`")
 	}
+	if !strings.Contains(cliDoc, "- `select`:") {
+		t.Errorf("backend-cli.md missing exit-code convention for `select`")
+	}
 	if !strings.Contains(cliDoc, "- `cancel`:") {
 		t.Errorf("backend-cli.md missing exit-code convention for `cancel`")
 	}
 	if !strings.Contains(cliDoc, "- `audit`:") {
 		t.Errorf("backend-cli.md missing exit-code convention for `audit`")
 	}
-	if !strings.Contains(cliDoc, "run, verdict, cancel, notify, ask, ack, status, version, list, recent, audit") {
-		t.Errorf("backend-cli.md missing full 11 CLI socket ops list including cancel, ask, and audit")
+	if !strings.Contains(cliDoc, "run, verdict, cancel, notify, ask, select, ack, status, version, list, recent, audit") {
+		t.Errorf("backend-cli.md missing full 12 CLI socket ops list including cancel, ask, select, and audit")
 	}
 
 	// Check backend-adapter.md specific representations.
@@ -183,11 +205,14 @@ func TestDocsConsistency(t *testing.T) {
 	}
 	adapterDoc := string(adapterDocBytes)
 
-	if !strings.Contains(adapterDoc, "10 of 15 ops") {
-		t.Errorf("backend-adapter.md missing '10 of 15 ops' reference")
+	if !strings.Contains(adapterDoc, "11 of 16 ops") {
+		t.Errorf("backend-adapter.md missing '11 of 16 ops' reference")
 	}
 	if !strings.Contains(adapterDoc, "`run`, `notify`, `ask`, `version`, `help`") {
 		t.Errorf("backend-adapter.md missing 'run, notify, ask, version, help' list")
+	}
+	if !strings.Contains(adapterDoc, "{select:{id,selection,selection_idx}}") {
+		t.Errorf("backend-adapter.md missing select socket op in op table")
 	}
 	if !strings.Contains(adapterDoc, "{cancel:{id,reason,by:\"consumer\"}}") {
 		t.Errorf("backend-adapter.md missing cancel socket op in op table")

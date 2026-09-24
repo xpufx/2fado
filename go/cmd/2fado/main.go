@@ -32,7 +32,7 @@ var (
 )
 
 func usage() int {
-	fmt.Println("usage: 2fado daemon | 2fado run -- <argv...> | 2fado approve|deny <id> | 2fado cancel <id> [--reason <text>] | 2fado notify --link <url> --summary <text> [--ttl <dur>] | 2fado ask --question <q> --option <o> --option <o> [--link <url>] [--ttl <dur>] | 2fado ack <id> | 2fado status <id> | 2fado list | 2fado recent [--limit N] | 2fado audit [--limit N] [--cursor C] [--ev E] [--id RID] [--uid U] [--since UNIX] [--until UNIX] | 2fado version")
+	fmt.Println("usage: 2fado daemon | 2fado run -- <argv...> | 2fado approve|deny <id> | 2fado select <id> [--index N | --choice text] | 2fado cancel <id> [--reason <text>] | 2fado notify --link <url> --summary <text> [--ttl <dur>] | 2fado ask --question <q> --option <o> --option <o> [--link <url>] [--ttl <dur>] | 2fado ack <id> | 2fado status <id> | 2fado list | 2fado recent [--limit N] | 2fado audit [--limit N] [--cursor C] [--ev E] [--id RID] [--uid U] [--since UNIX] [--until UNIX] | 2fado version")
 	return 2
 }
 
@@ -153,6 +153,83 @@ func askCmd(sock string, args []string) int {
 		ttlSeconds = int64(d / time.Second)
 	}
 	return client.Ask(sock, question, options, link, ttlSeconds, multiSelect, allowWriteIn)
+}
+
+// selectCmd parses: 2fado select <id> [--index N | --choice text].
+func selectCmd(sock string, args []string) int {
+	if len(args) == 0 {
+		return usage()
+	}
+	var id, choice string
+	selectionIdx := -1
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--index", "-i":
+			if i+1 >= len(args) {
+				return usage()
+			}
+			i++
+			n, err := strconv.Atoi(args[i])
+			if err != nil || n < 0 {
+				fmt.Fprintln(os.Stderr, "2fado: bad --index (want non-negative int)")
+				return 2
+			}
+			selectionIdx = n
+		case "--choice", "-c":
+			if i+1 >= len(args) {
+				return usage()
+			}
+			i++
+			choice = args[i]
+		default:
+			if strings.HasPrefix(args[i], "-") {
+				return usage()
+			}
+			if id == "" {
+				id = args[i]
+			} else if choice == "" {
+				choice = args[i]
+			} else {
+				return usage()
+			}
+		}
+	}
+	if id == "" {
+		return usage()
+	}
+	// If only index or only choice is specified, resolve the counterpart from daemon status
+	if choice == "" && selectionIdx >= 0 {
+		st, err := client.QueryStatus(sock, id)
+		if err == nil && len(st.Options) > 0 {
+			if selectionIdx < len(st.Options) {
+				choice = st.Options[selectionIdx]
+			} else {
+				fmt.Fprintf(os.Stderr, "2fado: index %d out of range (options: %d)\n", selectionIdx, len(st.Options))
+				return 1
+			}
+		}
+	} else if choice != "" && selectionIdx < 0 {
+		st, err := client.QueryStatus(sock, id)
+		if err == nil && len(st.Options) > 0 {
+			for idx, opt := range st.Options {
+				if opt == choice {
+					selectionIdx = idx
+					break
+				}
+			}
+		}
+		if selectionIdx < 0 {
+			selectionIdx = 0
+		}
+	}
+	if choice == "" {
+		fmt.Fprintln(os.Stderr, "2fado: must specify --choice <text> or --index <N>")
+		return usage()
+	}
+	if selectionIdx < 0 {
+		selectionIdx = 0
+	}
+	return client.Select(sock, id, choice, selectionIdx)
 }
 
 // cancelCmd parses: 2fado cancel <id> [--reason <text>].
@@ -313,6 +390,8 @@ func main() {
 			os.Exit(usage())
 		}
 		os.Exit(client.Verdict(sock, os.Args[1], os.Args[2]))
+	case "select":
+		os.Exit(selectCmd(sock, os.Args[2:]))
 	case "cancel":
 		os.Exit(cancelCmd(sock, os.Args[2:]))
 	case "notify":
