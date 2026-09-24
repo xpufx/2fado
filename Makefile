@@ -47,10 +47,13 @@ DEV_LOG_FILE ?= $(DEV_ROOT)/2fadod.log
 
 .PHONY: build test cross-build dist clean restart-daemon restart-daemon-fallback stop-daemon stop-daemon-fallback \
 	service-install dev dev-stop status vet fmt reload ready reload-plugin \
-	verify-escalation-excluded test-escalation test
+	verify-escalation-excluded test-escalation test install-companion
 
 build:
 	cd go && go build -ldflags "$(LDFLAGS)" -o ../bin/2fado ./cmd/2fado
+
+install-companion:
+	node scripts/install-companion.mjs
 
 # --- systemd --user management --------------------------------------------
 

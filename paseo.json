@@ -3,6 +3,9 @@
     "forgejo-hook": {
       "type": "service",
       "command": "node scripts/forgejo-hook.mjs"
+    },
+    "install-companion": {
+      "command": "node scripts/install-companion.mjs"
     }
   }
 }

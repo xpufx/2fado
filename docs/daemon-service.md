@@ -1,14 +1,17 @@
 # Daemon service management & dev/worktree workflow
 
-`2fadod` runs two ways:
+`2fadod` runs three ways:
 
 1. **systemd --user** (the canonical path): `2fadod.service`, supervised,
    restarted on failure, logged via `journalctl --user`. Standard XDG paths.
-2. **Fallback / isolated dev** (no systemd): `make dev` or the ad-hoc
+2. **Paseo Plugin Supervisor** (desktop plugin context): embedded supervisor in
+   the Paseo desktop plugin, managing lifecycle and companion binary acquisition
+   without requiring systemd.
+3. **Fallback / isolated dev** (no systemd): `make dev` or the ad-hoc
    `restart-daemon` fallback, used by sandboxes and agents that have no
    active systemd user session.
 
-The two paths share one socket/state resolution chain (see "Environment
+The paths share one socket/state resolution chain (see "Environment
 overrides" below) so a client always reaches whichever daemon the
 environment names.
 
@@ -83,6 +86,34 @@ make dev \
   && TWOFADO_SOCKET="$PWD/.testrun/run/2fado.sock" ./bin/2fado socket-version \
   && make dev-stop
 ```
+
+## Paseo Plugin Supervisor & Auto-Install (non-systemd desktop)
+
+In the Paseo desktop plugin context (`plugins/twofado`), users can run without
+`systemd --user` or manual terminal intervention. The plugin server supervises
+the `2fado daemon` process directly and manages binary acquisition:
+
+1. **Check socket first**: The supervisor checks `$TWOFADO_SOCKET`,
+   `$XDG_RUNTIME_DIR/2fado/2fado.sock`, or `/tmp/2fado.sock`. If an existing
+   daemon (systemd or standalone) is healthy, it adopts it as `managed: "external"`.
+2. **Companion binary acquisition**:
+   - At plugin install time, Paseo executes `build` preparation commands declared
+     in `paseo-plugin.json`:
+     `"build": [["node", "scripts/install-companion.mjs"]]`
+   - `scripts/install-companion.mjs` detects the host OS and architecture
+     (`linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`), downloads
+     the matching release archive, verifies SHA256 checksums from `SHA256SUMS`,
+     and unpacks it into `bin/2fado`.
+   - In dev/local mode, it automatically detects and uses local `dist/` archives.
+   - At runtime, the plugin UI provides an on-demand fallback button to install
+     the binary if initial acquisition was skipped.
+3. **Embedded supervisor RPCs**:
+   - `daemon.status`: reports state (`online`, `offline`, `starting`), PID,
+     socket path, version, and uptime.
+   - `daemon.start` / `daemon.stop` / `daemon.restart`: manages child process
+     lifecycle without requiring root or systemd.
+   - `daemon.logs`: streams the in-memory circular ring buffer of recent daemon
+     stdout/stderr logs for troubleshooting.
 
 ## Environment overrides
 
