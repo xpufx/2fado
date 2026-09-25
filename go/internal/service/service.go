@@ -1246,6 +1246,10 @@ func (s Service) TelegramSetConfig(req protocol.TelegramSetConfigRequest, caller
 	if approvers == nil {
 		approvers = []string{}
 	}
+	chatID := strings.TrimSpace(req.ChatID)
+	if len(approvers) == 0 && chatID != "" {
+		approvers = []string{chatID}
+	}
 	userCfg := config.UserConfig{
 		BotToken:           token,
 		ChatID:             strings.TrimSpace(req.ChatID),
