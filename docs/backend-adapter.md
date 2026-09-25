@@ -15,7 +15,7 @@ Privilege escalation is disabled in the default build and no escalation features
 
 - Unix socket, JSON-lines: one JSON object + `\n` per request, one JSON line back, fresh connection per call.
 - Socket timeout 2000ms per candidate (`telegram_info` uses 8000ms); every RPC wrapped in a 5s-timeout, max-4-inflight guard.
-- Socket candidate order: per-call `socketPath` → `$TWOFADO_SOCKET` → `$FADO_SOCKET` → `$TWOFADO_RUN_DIR/2fado.sock` → `$XDG_RUNTIME_DIR/2fado/2fado.sock` → `/tmp/2fado.sock`. The daemon's canonical socket is `$XDG_RUNTIME_DIR/2fado/2fado.sock` (see docs/daemon-service.md).
+- Socket candidate order: per-call `socketPath` first, then the live-probing client chain — `$TWOFADO_SOCKET` → `$FADO_SOCKET` → `$TWOFADO_RUN_DIR/2fado.sock` → `~/.paseo/plugin-data/{xpufx,xpufx-org}/twofado/run/2fado.sock` → `$XDG_RUNTIME_DIR/2fado/2fado.sock` → `/tmp/2fado.sock` (150 ms unix-dial probe per candidate, first live wins, dead explicit path warns and continues; #108). The daemon's own bind path is `TWOFADO_SOCKET`/`FADO_SOCKET` → `$TWOFADO_RUN_DIR/2fado.sock` → `$XDG_RUNTIME_DIR/2fado/2fado.sock` → `/tmp/2fado.sock` — see docs/daemon-service.md.
 - Envelope (`protocol.ClientMessage`): exactly one field set. Third-party consumers use 11 of 16 ops (list, verdict, select, cancel, ack, recent, audit, status, telegram_info, telegram_set_config, policy_add_rule — see the op table below); `run`, `notify`, `ask`, `version`, `help` are producer/CLI-only or discovery today (see `docs/backend-cli.md`).
 
 ## Op table (consumer → backend)

@@ -40,8 +40,7 @@ coded for the bot path), pager (stdout until you paste the token).
    escalation via `target_user`; not in this release.
 3. Policy tiers (allow/keyboard) → fewer buzzes.
 4. Approval UI + IdP → replaces inline taps when taps aren't enough.
-5. Planned `2fado kill` (not implemented — no such subcommand today) +
-   disconnect-withdraw → honest cancellation (owned pgs).
-```
+5. Planned `2fado kill` (not implemented — no such subcommand today; use
+   `2fado cancel <id>`) + disconnect-withdraw → honest cancellation (owned pgs).
 
 > Binary lives in `bin/` (gitignored); `make build`.

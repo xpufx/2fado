@@ -11,10 +11,18 @@ every path: deny, timeout, error, or a phone left untouched.
 
 ## Status: working PoC
 
-Live and ringing: single Go binary (`2fado daemon | run | approve|deny |
-notify | ack | status | version | socket-version`), stdlib-only, Telegram
-pager, verified end to end (approve-by-phone, deny-by-phone, timeout,
-sender allowlist, one-time tokens, audit log).
+Live and ringing: single Go binary, stdlib-only, Telegram pager, verified end
+to end (approve-by-phone, deny-by-phone, timeout, sender allowlist, one-time
+tokens, audit log). Full subcommand list in
+[docs/backend-cli.md](docs/backend-cli.md); the daemon socket speaks 16 typed
+ops ([docs/backend-api.md](docs/backend-api.md)).
+
+| Role | Subcommands |
+|---|---|
+| producer / operator | `daemon`, `run -- <argv…> [--detach]`, `ask`, `select`, `cancel`, `notify`, `ack` |
+| inspector | `approve\|deny <id>`, `status <id>`, `list`, `recent`, `audit` |
+| health | `version`, `socket-version` |
+
 Runs unprivileged — approved commands execute as the daemon user only;
 execution-identity escalation is not in this release. The privilege-switching
 code is **not compiled into the default binary at all** (#61): `go build ./...`
@@ -30,40 +38,43 @@ out-of-band for development.
 - No root execution, credential delegation, or identity escalation is promised or provided.
 
 ```
-go/          Go module (stdlib only): single `2fado` binary —
-              `daemon | run -- <argv...> | approve|deny <id> |
-              notify | ack <id> | status <id> | version | socket-version`
-              typed protocol, service/transport split (MCP fork kept open)
-bin/         build output (`make build`, gitignored)
-etc/         2fado.conf.example (__TELEGRAM_BOT_TOKEN__ / __TELEGRAM_USER_ID__),
-              policy.json.example, 2fadod.service (systemd --user unit),
-              2fadod@.service (templated instance unit), 2fadod.service.example
-              (future system/root layout, not used today)
-docs/poc.md             runbook: try the PoC in two terminals, no root needed
-docs/daemon-service.md  systemd --user service + isolated dev/worktree workflow
-docs/backend-cli.md     CLI usage reference
-docs/backend-api.md     daemon socket API reference for third-party consumers
-docs/backend-adapter.md third-party backend contract (design)
-docs/build-and-release.md
-                        cross-platform build runbook & release verification
-docs/toctou-suspended-execution.md
-                        design decision: suspended execution vs TOCTOU race
+go/            Go module (stdlib only): single `2fado` binary, cmd/2fado +
+                internal/{client,config,daemon,policy,protocol,service,store,telegram}
+bin/           build output (`make build`, gitignored)
+Makefile       build, systemd/dev daemon lifecycle, cross-build, dist, test, vet
+scripts/       build-cross.sh, install-companion.mjs, daemon-supervisor.mjs,
+                publish-github-release.sh, mirror-github.sh
+etc/           2fado.conf.example (__TELEGRAM_BOT_TOKEN__ / __TELEGRAM_USER_ID__),
+                policy.json.example, 2fadod.service (systemd --user unit),
+                2fadod@.service (templated instance unit), 2fadod.service.example
+                (future system/root layout, not used today)
+docs/poc.md                       runbook: try the PoC in two terminals, no root needed
+docs/daemon-service.md            systemd --user service, socket discovery, dev/worktree workflow
+docs/backend-cli.md               CLI usage reference (subcommands, flags, env, exit codes)
+docs/backend-api.md               daemon socket API reference for third-party consumers
+docs/backend-adapter.md           third-party backend contract (design)
+docs/build-and-release.md         cross-platform build runbook & release verification
+docs/toctou-suspended-execution.md design decision: suspended execution vs TOCTOU race
+docs/telegram-rich-surfaces.md    RFC: expandable blocks, spoilers, paged lists
 ```
 
 ## Try it (no root, no token)
 
 ```sh
 make dev                                        # isolated daemon, repo-local socket/state
+export TWOFADO_SOCKET="$PWD/.testrun/run/2fado.sock"   # the CLI probes this first
 ./bin/2fado run -- /bin/echo hi                 # terminal 1: waits
 ./bin/2fado approve <request-id>                # terminal 2: the human
 make dev-stop                                   # clean shutdown
 ```
 
 `make dev` pins the daemon to a repo-local socket/state (`.testrun/`) and
-prints the exact env to export, so it never touches a real daemon. On a
-machine with a systemd user session, `make service-install` +
-`make restart-daemon` manages `2fadod.service` via `systemctl --user`
-instead. See docs/daemon-service.md.
+prints the exact env to export, so it never touches a real daemon. The export
+is required: a repo-local socket is not on the client discovery chain, so
+without `TWOFADO_SOCKET` the CLI would fall through to the XDG/`/tmp`
+candidates and miss it. On a machine with a systemd user session,
+`make service-install` + `make restart-daemon` manages `2fadod.service` via
+`systemctl --user` instead. See docs/daemon-service.md.
 
 (TWOFADO_SOCKET/TWOFADO_STATE_DIR/TWOFADO_RUN_DIR/TWOFADO_CONF env as in
 docs/daemon-service.md; legacy FADO_* also supported.)
@@ -73,16 +84,20 @@ becomes your phone (outbound long-poll, no open ports).
 
 ## Cross-platform builds & packaging
 
-`2fado` is built with Go stdlib only and supports `linux/amd64`, `linux/arm64`,
-`darwin/amd64`, and `darwin/arm64`.
+`2fado` is built with Go stdlib only and cross-compiles to `linux/amd64`,
+`linux/arm64`, `darwin/amd64`, and `darwin/arm64` (`CGO_ENABLED=0`).
 
 ```sh
-make cross-build        # cross-compile all binaries into dist/
-make dist               # bundle tarballs + generate SHA256SUMS
+make cross-build        # cross-compile versioned bare binaries into dist/
+make dist               # also bundle legacy tarballs + generate SHA256SUMS
+make install-companion  # fetch the host binary from a published release
 ```
 
-See [docs/build-and-release.md](docs/build-and-release.md) for full build instructions,
-single-platform compilation (e.g. Apple Silicon macOS), and release verification.
+`make dist VERSION=0.1.3` emits `2fado-<version>-<os>-<arch>` binaries,
+`2fado-<version>-<os>-<arch>.tar.gz` archives, and a `SHA256SUMS` manifest
+covering both. See [docs/build-and-release.md](docs/build-and-release.md) for
+the full runbook, single-platform compilation (e.g. Apple Silicon macOS), the
+`PLATFORMS=` override, and the automated Forgejo → GitHub release mirror.
 
 ## Design in one breath
 
