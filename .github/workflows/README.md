@@ -11,3 +11,6 @@ The workflow definitions in this directory (`.github/workflows/`) are copied fro
 > - Automatic triggers on tags (`v*`) and release publication are handled exclusively by Forgejo CI to avoid double execution.
 > - The workflows here are restricted to manual execution (`workflow_dispatch`) on GitHub Actions.
 > - Automated build artifacts from Forgejo releases are continuously mirrored to GitHub Releases via `scripts/publish-github-release.sh`.
+>
+> **GitHub Actions Constraints**:
+> - GitHub Actions requires all workflow files, including reusable workflows, to be placed directly in the root of `.github/workflows/` (subdirectories like `reusable/` are rejected with HTTP 422). Therefore, the reusable workflow is stored as `reusable-cross-build.yml`.

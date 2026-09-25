@@ -21,7 +21,7 @@ on:
 jobs:
   build:
     name: Build & package cross-platform release artifacts
-    uses: ./.github/workflows/reusable/cross-build.yml
+    uses: ./.github/workflows/reusable-cross-build.yml
     with:
       version: ${{ inputs.version || '' }}
       upload_release_assets: ${{ inputs.upload_release_assets || false }}
