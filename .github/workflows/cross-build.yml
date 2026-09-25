@@ -1,0 +1,31 @@
+# Cross-platform build & release package caller workflow (GitHub Actions).
+# Manual workflow_dispatch caller for GitHub Actions runners.
+# Delegates to reusable workflow .github/workflows/reusable/cross-build.yml running on ubuntu-24.04.
+
+name: Cross-platform build & release package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Target build version override (e.g. 0.2.0)'
+        required: false
+        type: string
+        default: ''
+      upload_release_assets:
+        description: 'Mirror release assets to GitHub Releases'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    name: Build & package cross-platform release artifacts
+    uses: ./.github/workflows/reusable/cross-build.yml
+    with:
+      version: ${{ inputs.version || '' }}
+      upload_release_assets: ${{ inputs.upload_release_assets || false }}
+      release_id: 0
+    secrets:
+      FORGEJO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_RELEASE_TOKEN: ${{ secrets.GH_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
