@@ -550,14 +550,15 @@ func (c Client) Poll(ctx context.Context, offset int64, approvers map[string]boo
 			offset = u.ID + 1
 			data := u.Callback.Data
 			by := strconv.FormatInt(u.Callback.From.ID, 10)
-			if !approvers[by] {
-				continue
-			}
 			kind, rid, idx, ok := splitVerdict(data)
 			if !ok {
 				if data == "noop" {
 					c.answer(u.Callback.ID, "")
 				}
+				continue
+			}
+			if !approvers[by] {
+				c.answer(u.Callback.ID, "not authorized")
 				continue
 			}
 			select {

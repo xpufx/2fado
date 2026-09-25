@@ -272,3 +272,19 @@ func TestConfigEnvResolutionPrecedence(t *testing.T) {
 	os.Unsetenv("FADO_USER_CONFIG")
 }
 
+func TestApproverSetFallsBackToChatID(t *testing.T) {
+	c := Conf{ChatID: "11142880"}
+	set := c.ApproverSet()
+	if !set["11142880"] {
+		t.Errorf("expected chat id to be an approver when list is empty, got %v", set)
+	}
+	c = Conf{ChatID: "11142880", Approvers: []string{"999", "  ", ""}}
+	set = c.ApproverSet()
+	if !set["999"] || set["11142880"] || set["  "] {
+		t.Errorf("expected explicit approvers only, got %v", set)
+	}
+	c = Conf{}
+	if len(c.ApproverSet()) != 0 {
+		t.Errorf("expected empty set, got %v", c.ApproverSet())
+	}
+}

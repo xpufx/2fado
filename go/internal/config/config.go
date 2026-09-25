@@ -237,7 +237,14 @@ func parsePositiveInt(raw string) int {
 func (c Conf) ApproverSet() map[string]bool {
 	set := map[string]bool{}
 	for _, a := range c.Approvers {
-		set[a] = true
+		if a = strings.TrimSpace(a); a != "" {
+			set[a] = true
+		}
+	}
+	if len(set) == 0 {
+		if id := strings.TrimSpace(c.ChatID); id != "" {
+			set[id] = true
+		}
 	}
 	return set
 }
