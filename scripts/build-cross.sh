@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 # scripts/build-cross.sh — Cross-compile 2fado companion binary for supported platforms.
 #
-# Supported target platforms:
+# Supported target platforms (bare binaries, no archives):
 #   - linux/amd64
 #   - linux/arm64
 #   - darwin/amd64
 #   - darwin/arm64
+#   - windows/amd64 (binary carries .exe suffix)
 #
 # Output:
-#   Binaries and release archives are placed in dist/ (or $DIST_DIR),
-#   strictly untracked and gitignored.
+#   Versioned bare binaries placed in dist/ (or $DIST_DIR),
+#   strictly untracked and gitignored, plus SHA256SUMS.
+#   Asset name: 2fado-<version>-<os>-<arch>[.exe]
 #
 # Usage:
 #   scripts/build-cross.sh [--package] [--clean] [--dist-dir <dir>] [--version <ver>]
@@ -20,6 +22,9 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="${DIST_DIR:-$REPO_ROOT/dist}"
 DEFAULT_PLATFORMS=("linux/amd64" "linux/arm64" "darwin/amd64" "darwin/arm64")
+# NOTE: windows/amd64 excluded from defaults — Go sources have unix-only
+# files (owner_unix.go, secure_unix.go) with no Windows stubs yet.
+# Override with PLATFORMS="windows/amd64" once ported.
 PLATFORMS=("${PLATFORMS[@]:-${DEFAULT_PLATFORMS[@]}}")
 
 VERSION="${VERSION:-0.1.0-dev}"
@@ -30,37 +35,37 @@ PACKAGE=0
 CLEAN=0
 
 while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --package|-p)
-      PACKAGE=1
-      shift
-      ;;
-    --clean)
-      CLEAN=1
-      shift
-      ;;
-    --dist-dir)
-      DIST_DIR="$2"
-      shift 2
-      ;;
-    --version)
-      VERSION="$2"
-      shift 2
-      ;;
-    --help|-h)
-      echo "Usage: $0 [--package] [--clean] [--dist-dir <dir>] [--version <ver>]"
-      exit 0
-      ;;
-    *)
-      echo "Unknown argument: $1" >&2
-      exit 1
-      ;;
-  esac
+	case "$1" in
+	--package | -p)
+		PACKAGE=1
+		shift
+		;;
+	--clean)
+		CLEAN=1
+		shift
+		;;
+	--dist-dir)
+		DIST_DIR="$2"
+		shift 2
+		;;
+	--version)
+		VERSION="$2"
+		shift 2
+		;;
+	--help | -h)
+		echo "Usage: $0 [--package] [--clean] [--dist-dir <dir>] [--version <ver>]"
+		exit 0
+		;;
+	*)
+		echo "Unknown argument: $1" >&2
+		exit 1
+		;;
+	esac
 done
 
 if [[ "$CLEAN" -eq 1 ]]; then
-  echo "==> Cleaning $DIST_DIR..."
-  rm -rf "$DIST_DIR"
+	echo "==> Cleaning $DIST_DIR..."
+	rm -rf "$DIST_DIR"
 fi
 
 mkdir -p "$DIST_DIR"
@@ -69,48 +74,60 @@ LDFLAGS="-X main.GitCommit=${GIT_COMMIT} -X main.BuildTime=${BUILD_TIME} -X main
 
 echo "==> Cross-compiling 2fado (version: ${VERSION}, commit: ${GIT_COMMIT})..."
 for pair in "${PLATFORMS[@]}"; do
-  os="${pair%/*}"
-  arch="${pair#*/}"
-  bin_name="2fado-${os}-${arch}"
-  out_path="${DIST_DIR}/${bin_name}"
+	os="${pair%/*}"
+	arch="${pair#*/}"
+	ext=""
+	if [[ "$os" == "windows" ]]; then ext=".exe"; fi
+	bin_name="2fado-${VERSION}-${os}-${arch}${ext}"
+	out_path="${DIST_DIR}/${bin_name}"
 
-  echo "    -> Building ${os}/${arch} -> ${bin_name}"
-  CGO_ENABLED=0 GOOS="${os}" GOARCH="${arch}" \
-    go build -C "${REPO_ROOT}/go" \
-      -ldflags "${LDFLAGS}" \
-      -o "${out_path}" \
-      ./cmd/2fado
-  chmod 0755 "${out_path}"
+	echo "    -> Building ${os}/${arch} -> ${bin_name}"
+	CGO_ENABLED=0 GOOS="${os}" GOARCH="${arch}" \
+		go build -C "${REPO_ROOT}/go" \
+		-ldflags "${LDFLAGS}" \
+		-o "${out_path}" \
+		./cmd/2fado
+	chmod 0755 "${out_path}" 2>/dev/null || true
 done
 
+echo "==> Generating SHA256SUMS..."
+(
+	cd "$DIST_DIR"
+	rm -f SHA256SUMS
+	sha256sum 2fado-* >SHA256SUMS
+)
+echo "    -> Wrote ${DIST_DIR}/SHA256SUMS"
+
 if [[ "$PACKAGE" -eq 1 ]]; then
-  echo "==> Packaging release archives into $DIST_DIR..."
-  TMP_STAGE="$(mktemp -d)"
-  trap 'rm -rf "$TMP_STAGE"' EXIT
+	echo "==> Packaging legacy release archives into $DIST_DIR..."
+	TMP_STAGE="$(mktemp -d)"
+	trap 'rm -rf "$TMP_STAGE"' EXIT
 
-  for pair in "${PLATFORMS[@]}"; do
-    os="${pair%/*}"
-    arch="${pair#*/}"
-    bin_name="2fado-${os}-${arch}"
-    archive_name="2fado-${VERSION}-${os}-${arch}.tar.gz"
+	for pair in "${PLATFORMS[@]}"; do
+		os="${pair%/*}"
+		arch="${pair#*/}"
+		ext=""
+		if [[ "$os" == "windows" ]]; then ext=".exe"; fi
+		bin_name="2fado-${VERSION}-${os}-${arch}${ext}"
+		archive_name="2fado-${VERSION}-${os}-${arch}.tar.gz"
 
-    stage_dir="${TMP_STAGE}/${os}-${arch}"
-    mkdir -p "${stage_dir}"
-    cp "${DIST_DIR}/${bin_name}" "${stage_dir}/2fado"
-    cp "${REPO_ROOT}/LICENSE" "${stage_dir}/" 2>/dev/null || true
-    cp "${REPO_ROOT}/README.md" "${stage_dir}/" 2>/dev/null || true
+		stage_dir="${TMP_STAGE}/${os}-${arch}"
+		mkdir -p "${stage_dir}"
+		cp "${DIST_DIR}/${bin_name}" "${stage_dir}/2fado${ext}"
+		cp "${REPO_ROOT}/LICENSE" "${stage_dir}/" 2>/dev/null || true
+		cp "${REPO_ROOT}/README.md" "${stage_dir}/" 2>/dev/null || true
 
-    tar -czf "${DIST_DIR}/${archive_name}" -C "${stage_dir}" 2fado LICENSE README.md
-    echo "    -> Packaged ${archive_name}"
-  done
+		tar -czf "${DIST_DIR}/${archive_name}" -C "${stage_dir}" "2fado${ext}" LICENSE README.md
+		echo "    -> Packaged ${archive_name}"
+	done
 
-  echo "==> Generating SHA256SUMS..."
-  (
-    cd "$DIST_DIR"
-    rm -f SHA256SUMS
-    sha256sum 2fado-* > SHA256SUMS
-  )
-  echo "    -> Wrote ${DIST_DIR}/SHA256SUMS"
+	echo "==> Regenerating SHA256SUMS (binaries + archives)..."
+	(
+		cd "$DIST_DIR"
+		rm -f SHA256SUMS
+		sha256sum 2fado-* >SHA256SUMS
+	)
+	echo "    -> Wrote ${DIST_DIR}/SHA256SUMS"
 fi
 
 echo "==> Build complete in $DIST_DIR"
