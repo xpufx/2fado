@@ -9,10 +9,38 @@ import (
 	"net"
 	"os"
 
+	"2fado/internal/config"
 	"2fado/internal/protocol"
 )
 
+// ResolveSocket returns an explicit socket path when one is given, otherwise
+// the first live candidate from config.DiscoverSocketPath. Passing "" is how
+// the CLI opts into discovery; a non-empty path (tests, internal callers)
+// bypasses probing entirely.
+func ResolveSocket(explicit string) (string, error) {
+	if explicit != "" {
+		return explicit, nil
+	}
+	return config.DiscoverSocketPath()
+}
+
 func call(sock string, msg protocol.ClientMessage) ([]byte, error) {
+	raw, _, err := callResolved(sock, msg)
+	return raw, err
+}
+
+// callResolved is call plus the concrete socket path the request used, so a
+// caller can surface which candidate discovery selected.
+func callResolved(sock string, msg protocol.ClientMessage) ([]byte, string, error) {
+	resolved, err := ResolveSocket(sock)
+	if err != nil {
+		return nil, "", err
+	}
+	raw, err := callOnSocket(resolved, msg)
+	return raw, resolved, err
+}
+
+func callOnSocket(sock string, msg protocol.ClientMessage) ([]byte, error) {
 	c, err := net.Dial("unix", sock)
 	if err != nil {
 		return nil, err
@@ -233,7 +261,7 @@ func Cancel(sock, id, reason string) int {
 
 // Status queries the state and execution outcome of a request id.
 func Status(sock, id string) int {
-	raw, err := call(sock, protocol.ClientMessage{
+	raw, resolved, err := callResolved(sock, protocol.ClientMessage{
 		Status: &protocol.StatusRequest{ID: id},
 	})
 	if err != nil {
@@ -247,7 +275,10 @@ func Status(sock, id string) int {
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(res)
+	_ = enc.Encode(struct {
+		Socket string `json:"socket"`
+		protocol.StatusResponse
+	}{Socket: resolved, StatusResponse: res})
 	if res.Status == "completed" {
 		return res.Exit
 	}

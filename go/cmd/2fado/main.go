@@ -349,7 +349,10 @@ func main() {
 	if len(os.Args) < 2 {
 		os.Exit(usage())
 	}
-	sock := config.DefaultSocketPath()
+	// Clients pass "" to opt into ordered, liveness-probing discovery
+	// (config.DiscoverSocketPath). The daemon keeps its configured bind path
+	// (SOCKET= or config.DefaultSocketPath), which discovery probes.
+	sock := ""
 	switch os.Args[1] {
 	case "daemon":
 		daemon.SetBuildInfo(Version, GitCommit, BuildTime)

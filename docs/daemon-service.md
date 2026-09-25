@@ -115,10 +115,42 @@ the `2fado daemon` process directly and manages binary acquisition:
    - `daemon.logs`: streams the in-memory circular ring buffer of recent daemon
      stdout/stderr logs for troubleshooting.
 
+## Socket discovery
+
+The daemon binds exactly one path (`config.DefaultSocketPath`, or `SOCKET=`
+in a config file). Clients do not assume that path is the live one: on every
+call they probe an ordered candidate chain with a unix-dial liveness check
+(150 ms per candidate) and use the first socket that accepts a connection
+(`config.DiscoverSocketPath`). Candidate order, first match wins:
+
+1. `TWOFADO_SOCKET` → `FADO_SOCKET` (explicit full path). If set but **dead**,
+   discovery prints a warning to stderr and continues down the chain rather
+   than failing.
+2. `TWOFADO_RUN_DIR` → `<run_dir>/2fado.sock` (relocates socket **and** pid
+   file as one knob; also `FADO_RUN_DIR`).
+3. `~/.paseo/plugin-data/<publisher>/twofado/run/2fado.sock`: the
+   plugin-supervised daemon (publisher is `xpufx`, with the `xpufx-org`
+   sibling also probed). Lets the CLI reach a plugin-managed daemon with no
+   env setup.
+4. `$XDG_RUNTIME_DIR/2fado/2fado.sock` (XDG runtime convention).
+5. `/tmp/2fado.sock` (graceful fallback).
+
+Candidates are deduped and empty entries dropped. If none is live,
+`DiscoverSocketPath` returns an error listing every probed candidate. Passing
+an explicit path (tests, embedded callers) skips discovery entirely, so the
+150 ms probe cost is paid only by the CLI's default path, and only until the
+first live candidate.
+
+`2fado status <id>` prints the connected socket as a `socket:` field
+alongside the daemon's `StatusResponse`, so it is always clear which daemon
+answered.
+
 ## Environment overrides
 
-The socket candidate chain is shared by daemon and CLI (`main.go` calls
-`config.DefaultSocketPath()`), so both resolve the same path:
+The socket candidate chain is shared by daemon and CLI: the daemon binds the
+single deterministic `config.DefaultSocketPath()`, and the CLI probes the
+superset chain above via `config.DiscoverSocketPath()` (see "Socket
+discovery"). The bind path resolves in this order:
 
 1. `TWOFADO_SOCKET` → `FADO_SOCKET` (explicit full path)
 2. `TWOFADO_RUN_DIR` → `<run_dir>/2fado.sock` (relocates socket **and** pid
