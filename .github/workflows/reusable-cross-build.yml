@@ -102,12 +102,14 @@ jobs:
 
           expected_targets=("linux-amd64" "linux-arm64" "darwin-amd64" "darwin-arm64")
           for target in "${expected_targets[@]}"; do
-            tarball="dist/2fado-${BUILD_VERSION}-${target}.tar.gz"
-            if [ ! -s "$tarball" ]; then
-              echo "::error::expected release tarball $tarball missing or empty"
+            ext=""
+            if [[ "$target" == windows-* ]]; then ext=".exe"; fi
+            bin="dist/2fado-${BUILD_VERSION}-${target}${ext}"
+            if [ ! -s "$bin" ]; then
+              echo "::error::expected release binary $bin missing or empty"
               exit 1
             fi
-            echo "Verified archive: $tarball ($(wc -c < "$tarball" | tr -d ' ') bytes)"
+            echo "Verified binary: $bin ($(wc -c < "$bin" | tr -d ' ') bytes)"
           done
 
       - name: Publish step summary
@@ -120,11 +122,12 @@ jobs:
               echo "- **Version**: \`${BUILD_VERSION}\`"
               echo "- **Commit**: \`${{ github.sha }}\`"
               echo ""
-              echo "### Generated Archives"
+              echo "### Generated Binaries"
               echo "| Filename | Size |"
               echo "| --- | --- |"
-              for f in dist/*.tar.gz; do
+              for f in dist/2fado-*; do
                 [ -e "$f" ] || continue
+                [ "$(basename "$f")" = "SHA256SUMS" ] && continue
                 size=$(du -h "$f" | cut -f1)
                 echo "| \`$(basename "$f")\` | $size |"
               done
