@@ -201,8 +201,8 @@ jobs:
             twofado_bin="./bin/2fado"
           elif [ -x "$HOME/.local/bin/2fado" ]; then
             twofado_bin="$HOME/.local/bin/2fado"
-          elif [ -x "/home/xpufx/.local/bin/2fado" ]; then
-            twofado_bin="/home/xpufx/.local/bin/2fado"
+          elif [ -x "$HOME/.local/bin/2fado" ]; then
+            twofado_bin="$HOME/.local/bin/2fado"
           elif [ -x "/usr/local/bin/2fado" ]; then
             twofado_bin="/usr/local/bin/2fado"
           fi
