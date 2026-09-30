@@ -1,0 +1,25 @@
+# Caller workflow for issue close guard.
+# Triggers on issue closed events and delegates to the reusable issue-close-guard workflow.
+
+name: Issue close guard (host runner)
+
+on:
+  issues:
+    types: [closed]
+
+jobs:
+  guard:
+    name: Reopen ticket, comment, and dispatch 2fado notify if closed by target actor
+    uses: ./.forgejo/workflows/reusable/issue-close-guard.yml
+    with:
+      actor: ${{ github.actor }}
+      issue_number: ${{ github.event.issue.number }}
+      issue_url: ${{ github.event.issue.html_url }}
+      target_actor: ${{ vars.TICKET_CLOSE_TARGET_ACTOR || secrets.TICKET_CLOSE_TARGET_ACTOR || 'xpufx' }}
+      twofado_socket: ${{ vars.TWOFADO_SOCKET || '/run/user/1001/2fado/2fado.sock' }}
+      twofado_bin: ${{ vars.TWOFADO_BIN || '' }}
+    # Caller job forwards repository token to reusable job
+    secrets:
+      FORGEJO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      issues: write
