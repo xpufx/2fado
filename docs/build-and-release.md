@@ -185,17 +185,17 @@ git status
 
 ## Release workflow (automated)
 
-Releases are no longer a hand-assembled GitHub step. `.forgejo/workflows/` is
-the canonical CI/CD source; `.github/workflows/` holds a manual-dispatch-only
-copy (see `.github/workflows/README.md` for the split and the placement
-constraint that forces the reusable workflow to sit in the `.github/workflows`
-root).
+Releases are automated via multi-forge CI/CD workflows. `.github/workflows/` is
+the canonical CI/CD source for portable container workflows (discovered and executed
+natively by both Forgejo Actions and GitHub Actions). Workflows requiring Forgejo
+host runners (`runner-local-shell`) are retained under `.forgejo/workflows/`
+(see `.github/workflows/README.md` for directory standards).
 
-### Forgejo (canonical)
+### Multi-Forge Cross-Build
 
-`.forgejo/workflows/cross-build.yml` fires on **release published**, on **push
+`.github/workflows/cross-build.yml` fires on **release published**, on **push
 of a `v*` tag**, or on **`workflow_dispatch`** with an optional `version`
-input. It delegates to `.forgejo/workflows/reusable/cross-build.yml` on
+input. It delegates to `.github/workflows/reusable-cross-build.yml` on
 `ubuntu-24.04`, which:
 
 1. Derives the build version from the input, else the tag with any leading `v`
@@ -205,9 +205,8 @@ input. It delegates to `.forgejo/workflows/reusable/cross-build.yml` on
    binaries is present and non-empty.
 4. Uploads a `2fado-cross-dist-<ver>` workflow artifact and writes a step
    summary on every run.
-5. Only when the trigger was `release: published` (the caller sets
-   `upload_release_assets: ${{ github.event_name == 'release' }}`) does it
-   attach every `dist/2fado-*` asset to that Forgejo release via the API and
+5. Only when the trigger was `release: published` (or `upload_release_assets: true`)
+   does it attach every `dist/2fado-*` asset to that Forgejo release via the API and
    mirror the same assets to the public GitHub mirror with
    `scripts/publish-github-release.sh --tag v<ver>` (via `gh` when
    authenticated, REST API fallback otherwise).
