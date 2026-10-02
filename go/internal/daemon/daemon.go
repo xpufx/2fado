@@ -334,12 +334,20 @@ func handle(svc *service.Service, c net.Conn) {
 	case msg.Select != nil:
 		id := strings.TrimSpace(msg.Select.ID)
 		selection := strings.TrimSpace(msg.Select.Selection)
+		writeIn := strings.TrimSpace(msg.Select.WriteIn)
+		if writeIn != "" {
+			selection = writeIn
+		}
+		by := strings.TrimSpace(msg.Select.By)
+		if by == "" {
+			by = fmt.Sprintf("socket:%d", uid)
+		}
 		if id == "" || selection == "" {
 			out, err = json.Marshal(protocol.SelectResponse{
 				Selected: false,
 				Error:    "missing id or selection",
 			})
-		} else if !svc.Store.Select(id, selection, msg.Select.SelectionIdx, fmt.Sprintf("socket:%d", uid)) {
+		} else if !svc.Store.Select(id, selection, msg.Select.SelectionIdx, by) {
 			out, err = json.Marshal(protocol.SelectResponse{
 				Selected: false,
 				Error:    "selection rejected",
