@@ -328,17 +328,17 @@ func TestPagedCardEscapesAndMarksEmpty(t *testing.T) {
 }
 
 func TestSplitVerdictPage(t *testing.T) {
-	kind, rid, idx, ok := splitVerdict("page:abc:2")
-	if !ok || kind != "page" || rid != "abc" || idx != 2 {
-		t.Fatalf("page parse = (%q,%q,%d,%v)", kind, rid, idx, ok)
+	kind, rid, idxs, ok := splitVerdict("page:abc:2")
+	if !ok || kind != "page" || rid != "abc" || len(idxs) != 1 || idxs[0] != 2 {
+		t.Fatalf("page parse = (%q,%q,%v,%v)", kind, rid, idxs, ok)
 	}
 	for _, bad := range []string{"page::2", "page:abc:", "page:abc:-1", "page:abc:x", "noop", "ask:abc"} {
 		if _, _, _, ok := splitVerdict(bad); ok {
 			t.Errorf("splitVerdict(%q) must not parse", bad)
 		}
 	}
-	if kind, rid, idx, ok := splitVerdict("ask:rid1:3"); !ok || kind != "ask" || rid != "rid1" || idx != 3 {
-		t.Errorf("ask parse regressed: (%q,%q,%d,%v)", kind, rid, idx, ok)
+	if kind, rid, idxs, ok := splitVerdict("ask:rid1:3"); !ok || kind != "ask" || rid != "rid1" || len(idxs) != 1 || idxs[0] != 3 {
+		t.Errorf("ask parse regressed: (%q,%q,%v,%v)", kind, rid, idxs, ok)
 	}
 }
 
@@ -374,7 +374,7 @@ func TestPollForwardsPageCallback(t *testing.T) {
 
 	select {
 	case v := <-out:
-		if v.Decision != "page" || v.RID != "rid9" || v.Idx != 2 {
+		if v.Decision != "page" || v.RID != "rid9" || len(v.Idxs) != 1 || v.Idxs[0] != 2 {
 			t.Fatalf("page verdict = %+v", v)
 		}
 	case <-time.After(2 * time.Second):

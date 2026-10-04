@@ -74,6 +74,12 @@ func (s Service) AskWithCancel(req protocol.AskRequest, uid uint32, cancel <-cha
 	if ttl > MaxAskTTL {
 		ttl = MaxAskTTL
 	}
+	// When Telegram is not configured (placeholder), use a reduced TTL
+	// so the ask does not block indefinitely waiting for a Telegram
+	// selection that cannot be recorded.
+	if s.isPlaceholder() {
+		ttl = MinAskTTL
+	}
 	rid := newRID()
 	expires := time.Now().Add(ttl)
 	_ = s.Store.Save(protocol.PendingRecord{
@@ -90,7 +96,7 @@ func (s Service) AskWithCancel(req protocol.AskRequest, uid uint32, cancel <-cha
 	}, rid)
 	s.Store.Append(protocol.AuditEvent{Ev: "ask", UID: uid, RID: rid, Step: "initial",
 		Question: question, Options: opts, Link: link})
-	s.pageAsk(rid, question, link, opts, recommended, ttl)
+	s.pageAsk(rid, question, link, opts, recommended, ttl, req.MultiSelect, req.AllowWriteIn)
 
 	sel, aborted := s.awaitSelection(rid, expires, cancel)
 	if aborted {
@@ -138,13 +144,14 @@ func (s Service) awaitSelection(rid string, expires time.Time, cancel <-chan str
 	}
 }
 
-func (s Service) pageAsk(rid, question, link string, opts []string, recommended int, ttl time.Duration) {
+func (s Service) pageAsk(rid, question, link string, opts []string, recommended int, ttl time.Duration, multiSelect bool, allowWriteIn bool) {
 	left := int64(ttl / time.Second)
 	if s.notifyTelegram() && !s.isPlaceholder() {
 		cid := s.activeChatID()
 		tg := s.activeTG()
 		text := telegram.AskCard(s.Host, question, link, rid, left, false, "", "")
-		if mid, err := tg.SendWithMarkup(cid, text, 0, telegram.AskButtons(rid, opts, recommended)); err == nil {
+		btns := telegram.AskButtons(rid, opts, recommended, multiSelect)
+		if mid, err := tg.SendWithMarkup(cid, text, 0, btns); err == nil {
 			s.Store.AttachPager(rid, cid, mid)
 			return
 		}
@@ -156,11 +163,14 @@ func (s Service) pageAsk(rid, question, link string, opts []string, recommended 
 	for i, o := range opts {
 		fmt.Printf("  [%d] %s\n", i, o)
 	}
+	if allowWriteIn {
+		fmt.Printf("  [write-in] Enter your answer:\n")
+	}
 }
 
 // closeAskCard rewrites the posted ask card: with a selection it shows
-// "Chosen: <option>", otherwise it marks the petition closed. Either way
-// the option buttons are stripped.
+// "Chosen: <option>" (or "Chosen: idx1,idx2" for multi-select), otherwise
+// it marks the petition closed. Either way the option buttons are stripped.
 func (s Service) closeAskCard(rid, selection, by string) {
 	if !s.notifyTelegram() || s.isPlaceholder() {
 		return

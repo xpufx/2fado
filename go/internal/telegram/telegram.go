@@ -324,7 +324,7 @@ const maxAskButtonRunes = 48
 
 // AskCard renders an interactive multi-choice question petition. While
 // pending it carries the question and a link; once chosen it shows the
-// winning option and its source. All untrusted fields are html-escaped.
+// chosen option and its source. All untrusted fields are html-escaped.
 func AskCard(host, question, link, rid string, expiresIn int64, chosen bool, selection, by string) string {
 	q := question
 	if r := []rune(q); len(r) > maxAskQuestionRunes {
@@ -352,7 +352,11 @@ func AskCard(host, question, link, rid string, expiresIn int64, chosen bool, sel
 // AskButtons builds the inline keyboard for an ask card: one callback
 // button per option, data "ask:<rid>:<idx>". RecommendedIndex marks one
 // option with a star (best-effort highlight; -1 or out of range = none).
-func AskButtons(rid string, options []string, recommended int) string {
+// When multiSelect is true, the operator can select multiple options.
+//
+// The verdict data format for multi-select is "ask:<rid>:idx1,idx2"
+// (comma-separated indices).
+func AskButtons(rid string, options []string, recommended int, multiSelect bool) string {
 	rows := make([][]InlineButton, 0, len(options))
 	for i, opt := range options {
 		label := fmt.Sprintf("%d. %s", i+1, opt)
@@ -367,6 +371,9 @@ func AskButtons(rid string, options []string, recommended int) string {
 			Data: "ask:" + rid + ":" + strconv.Itoa(i),
 		}})
 	}
+	// For multi-select, we could add a "Submit" or "Done" button,
+	// but the basic format remains the same: each button press
+	// records a single index, and the system accumulates selections.
 	kb, _ := json.Marshal(Keyboard{Buttons: rows})
 	return string(kb)
 }
@@ -509,8 +516,10 @@ type Verdict struct {
 	RID      string
 	Decision string
 	By       string
-	// Idx is the chosen option index for ask callbacks; unused otherwise.
-	Idx int
+	// Idxs is the chosen option index/indices for ask callbacks.
+	// For single-select, contains one index; for multi-select, contains
+	// comma-separated indices (e.g. []int{0, 2}).
+	Idxs []int
 }
 
 // Poll loops getUpdates (outbound long-poll, no open ports) and delivers
@@ -550,7 +559,7 @@ func (c Client) Poll(ctx context.Context, offset int64, approvers map[string]boo
 			offset = u.ID + 1
 			data := u.Callback.Data
 			by := strconv.FormatInt(u.Callback.From.ID, 10)
-			kind, rid, idx, ok := splitVerdict(data)
+			kind, rid, idxs, ok := splitVerdict(data)
 			if !ok {
 				if data == "noop" {
 					c.answer(u.Callback.ID, "")
@@ -562,7 +571,7 @@ func (c Client) Poll(ctx context.Context, offset int64, approvers map[string]boo
 				continue
 			}
 			select {
-			case out <- Verdict{RID: rid, Decision: kind, By: by, Idx: idx}:
+			case out <- Verdict{RID: rid, Decision: kind, By: by, Idxs: idxs}:
 			case <-ctx.Done():
 				return
 			}
@@ -574,7 +583,11 @@ func (c Client) Poll(ctx context.Context, offset int64, approvers map[string]boo
 			case "ask":
 				c.answer(u.Callback.ID, "answer recorded")
 			case "page":
-				c.answer(u.Callback.ID, fmt.Sprintf("page %d", idx+1))
+				if len(idxs) > 0 {
+					c.answer(u.Callback.ID, fmt.Sprintf("page %d", idxs[0]+1))
+				} else {
+					c.answer(u.Callback.ID, "page 1")
+				}
 			default:
 				c.answer(u.Callback.ID, "denied")
 			}
@@ -583,39 +596,51 @@ func (c Client) Poll(ctx context.Context, offset int64, approvers map[string]boo
 	}
 }
 
-func splitVerdict(data string) (kind, rid string, idx int, ok bool) {
+func splitVerdict(data string) (kind, rid string, idxs []int, ok bool) {
 	if strings.HasPrefix(data, "ask:") {
 		rest := strings.TrimPrefix(data, "ask:")
 		i := strings.LastIndex(rest, ":")
 		if i <= 0 || i == len(rest)-1 {
-			return "", "", 0, false
+			return "", "", nil, false
 		}
-		n, err := strconv.Atoi(rest[i+1:])
-		if err != nil || n < 0 {
-			return "", "", 0, false
+		indexPart := rest[i+1:]
+		if indexPart == "" {
+			return "", "", nil, false
 		}
-		return "ask", rest[:i], n, true
+		parts := strings.Split(indexPart, ",")
+		idxs = make([]int, 0, len(parts))
+		for _, p := range parts {
+			n, err := strconv.Atoi(strings.TrimSpace(p))
+			if err != nil || n < 0 {
+				return "", "", nil, false
+			}
+			idxs = append(idxs, n)
+		}
+		if len(idxs) == 0 {
+			return "", "", nil, false
+		}
+		return "ask", rest[:i], idxs, true
 	}
 	if strings.HasPrefix(data, "page:") {
 		rest := strings.TrimPrefix(data, "page:")
 		i := strings.LastIndex(rest, ":")
 		if i <= 0 || i == len(rest)-1 {
-			return "", "", 0, false
+			return "", "", nil, false
 		}
 		n, err := strconv.Atoi(rest[i+1:])
 		if err != nil || n < 0 {
-			return "", "", 0, false
+			return "", "", nil, false
 		}
-		return "page", rest[:i], n, true
+		return "page", rest[:i], []int{n}, true
 	}
 	if strings.HasPrefix(data, "approve:") {
-		return "approve", strings.TrimPrefix(data, "approve:"), 0, true
+		return "approve", strings.TrimPrefix(data, "approve:"), []int{}, true
 	}
 	if strings.HasPrefix(data, "deny:") {
-		return "deny", strings.TrimPrefix(data, "deny:"), 0, true
+		return "deny", strings.TrimPrefix(data, "deny:"), []int{}, true
 	}
 	if strings.HasPrefix(data, "ack:") {
-		return "ack", strings.TrimPrefix(data, "ack:"), 0, true
+		return "ack", strings.TrimPrefix(data, "ack:"), []int{}, true
 	}
-	return "", "", 0, false
+	return "", "", nil, false
 }

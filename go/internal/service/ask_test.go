@@ -193,7 +193,7 @@ func TestAskCardRendersQuestionOptionsAndChoice(t *testing.T) {
 	if !strings.Contains(chosen, "Chosen: Option 2: LRU") {
 		t.Fatalf("chosen card missing selection:\n%s", chosen)
 	}
-	btns := telegram.AskButtons("rid1", []string{"first", "second", "third"}, 1)
+	btns := telegram.AskButtons("rid1", []string{"first", "second", "third"}, 1, false)
 	for _, want := range []string{`ask:rid1:0`, `ask:rid1:1`, `ask:rid1:2`, "⭐ 2. second"} {
 		if !strings.Contains(btns, want) {
 			t.Fatalf("ask buttons missing %q:\n%s", want, btns)

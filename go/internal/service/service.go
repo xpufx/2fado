@@ -1308,7 +1308,7 @@ func (s Service) TelegramSetConfig(req protocol.TelegramSetConfigRequest, caller
 func (s Service) TelegramPump() {
 	for v := range s.Verdicts {
 		if v.Decision == "page" {
-			s.repage(v.RID, v.Idx)
+			s.repage(v.RID, v.Idxs[0])
 			continue
 		}
 		if v.Decision == "ack" {
@@ -1320,10 +1320,10 @@ func (s Service) TelegramPump() {
 		}
 		if v.Decision == "ask" {
 			rec, err := s.Store.Load(v.RID)
-			if err != nil || v.Idx < 0 || v.Idx >= len(rec.Options) {
+			if err != nil || len(v.Idxs) == 0 || v.Idxs[0] >= len(rec.Options) {
 				continue
 			}
-			s.Store.Select(v.RID, rec.Options[v.Idx], v.Idx, cleanBy("telegram:"+v.By))
+			s.Store.Select(v.RID, rec.Options[v.Idxs[0]], v.Idxs[0], cleanBy("telegram:"+v.By))
 			continue
 		}
 		if v.Decision == "cancel" || v.Decision == "cancelled" {
