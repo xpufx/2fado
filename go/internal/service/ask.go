@@ -8,6 +8,7 @@ package service
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -117,7 +118,7 @@ func (s Service) AskWithCancel(req protocol.AskRequest, uid uint32, cancel <-cha
 		Selection: sel.Selection, SelectionIdx: sel.SelectionIdx})
 	s.closeAskCard(rid, sel.Selection, sel.By)
 	return protocol.AskResult{Status: "selected", ID: rid, Question: question,
-		Selection: sel.Selection, SelectionIdx: sel.SelectionIdx, By: sel.By}
+		Selection: sel.Selection, SelectionIdx: sel.SelectionIdx, SelectionIdxs: sel.SelectionIdxs, By: sel.By}
 }
 
 // awaitSelection polls the store for a recorded choice. It returns
@@ -149,8 +150,8 @@ func (s Service) pageAsk(rid, question, link string, opts []string, recommended 
 	if s.notifyTelegram() && !s.isPlaceholder() {
 		cid := s.activeChatID()
 		tg := s.activeTG()
-		text := telegram.AskCard(s.Host, question, link, rid, left, false, "", "")
-		btns := telegram.AskButtons(rid, opts, recommended, multiSelect)
+		text := telegram.AskCard(s.Host, question, link, rid, left, false, "", "", multiSelect)
+		btns := telegram.AskButtons(rid, opts, recommended, multiSelect, nil)
 		if mid, err := tg.SendWithMarkup(cid, text, 0, btns); err == nil {
 			s.Store.AttachPager(rid, cid, mid)
 			return
@@ -184,6 +185,80 @@ func (s Service) closeAskCard(rid, selection, by string) {
 		left = 0
 	}
 	s.activeTG().Edit(rec.ChatID, rec.MsgID,
-		telegram.AskCard(s.Host, rec.Question, rec.Link, rid, left, selection != "", selection, by),
+		telegram.AskCard(s.Host, rec.Question, rec.Link, rid, left, selection != "", selection, by, rec.MultiSelect),
 		telegram.EmptyButtons())
+}
+
+// toggleAsk flips one multi-select option on a pending ask and repaints
+// the card keyboard. It writes only scratch state (the toggle set); the
+// answer is finalized later by submitAsk.
+func (s Service) toggleAsk(rid string, idx int) {
+	rec, err := s.Store.Load(rid)
+	if err != nil || rec.Kind != "ask" || !rec.MultiSelect {
+		return
+	}
+	if s.Store.SelectionInfo(rid) != nil || s.Store.CancelInfo(rid) != nil {
+		return
+	}
+	if idx < 0 || idx >= len(rec.Options) {
+		return
+	}
+	next := toggleIdx(rec.SelectedIdxs, idx)
+	if !s.Store.SetSelectedIdxs(rid, next) {
+		return
+	}
+	if !s.notifyTelegram() || s.isPlaceholder() || rec.ChatID == "" || rec.MsgID == 0 {
+		return
+	}
+	s.activeTG().EditMarkup(rec.ChatID, rec.MsgID,
+		telegram.AskButtons(rid, rec.Options, recAskRecommended(rec), true, next))
+}
+
+// submitAsk records every toggled multi-select option as one selection and
+// lets closeAskCard repaint the resolved card.
+func (s Service) submitAsk(rid, by string) {
+	rec, err := s.Store.Load(rid)
+	if err != nil || rec.Kind != "ask" || !rec.MultiSelect {
+		return
+	}
+	labels := make([]string, 0, len(rec.SelectedIdxs))
+	valid := make([]int, 0, len(rec.SelectedIdxs))
+	for _, i := range rec.SelectedIdxs {
+		if i >= 0 && i < len(rec.Options) {
+			labels = append(labels, rec.Options[i])
+			valid = append(valid, i)
+		}
+	}
+	if len(labels) == 0 {
+		return
+	}
+	s.Store.SelectMany(rid, strings.Join(labels, ", "), valid, by)
+}
+
+// recAskRecommended converts the stored 1-based recommended index into the
+// 0-based render index AskButtons expects (-1 = none).
+func recAskRecommended(rec protocol.PendingRecord) int {
+	if rec.RecommendedIndex >= 1 && rec.RecommendedIndex <= len(rec.Options) {
+		return rec.RecommendedIndex - 1
+	}
+	return -1
+}
+
+// toggleIdx returns set with idx flipped, kept sorted so the callback and
+// card render deterministically.
+func toggleIdx(set []int, idx int) []int {
+	out := make([]int, 0, len(set)+1)
+	found := false
+	for _, i := range set {
+		if i == idx {
+			found = true
+			continue
+		}
+		out = append(out, i)
+	}
+	if !found {
+		out = append(out, idx)
+	}
+	sort.Ints(out)
+	return out
 }

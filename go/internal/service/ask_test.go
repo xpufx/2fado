@@ -2,12 +2,17 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"2fado/internal/config"
 	"2fado/internal/policy"
 	"2fado/internal/protocol"
 	"2fado/internal/telegram"
@@ -185,15 +190,15 @@ func TestLegacyRecordsWithoutOptionsLoad(t *testing.T) {
 // TestAskCardRendersQuestionOptionsAndChoice checks the Telegram render
 // surface: card text, callback data, and the chosen-state header.
 func TestAskCardRendersQuestionOptionsAndChoice(t *testing.T) {
-	card := telegram.AskCard("host1", "Which <b>format</b>?", "https://example.com/x", "rid1", 60, false, "", "")
+	card := telegram.AskCard("host1", "Which <b>format</b>?", "https://example.com/x", "rid1", 60, false, "", "", false)
 	if !strings.Contains(card, "Which") || strings.Contains(card, "<b>format</b>") {
 		t.Fatalf("question must render escaped:\n%s", card)
 	}
-	chosen := telegram.AskCard("host1", "q", "", "rid1", 0, true, "Option 2: LRU", "telegram:42")
+	chosen := telegram.AskCard("host1", "q", "", "rid1", 0, true, "Option 2: LRU", "telegram:42", false)
 	if !strings.Contains(chosen, "Chosen: Option 2: LRU") {
 		t.Fatalf("chosen card missing selection:\n%s", chosen)
 	}
-	btns := telegram.AskButtons("rid1", []string{"first", "second", "third"}, 1, false)
+	btns := telegram.AskButtons("rid1", []string{"first", "second", "third"}, 1, false, nil)
 	for _, want := range []string{`ask:rid1:0`, `ask:rid1:1`, `ask:rid1:2`, "⭐ 2. second"} {
 		if !strings.Contains(btns, want) {
 			t.Fatalf("ask buttons missing %q:\n%s", want, btns)
@@ -207,6 +212,145 @@ func TestAskCardRendersQuestionOptionsAndChoice(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(btns), &kb); err != nil || len(kb.Inline) != 3 {
 		t.Fatalf("ask buttons = %s (err %v), want 3 rows", btns, err)
+	}
+}
+
+// TestTelegramMultiSelectAccumulatesUntilSubmit drives the pump path: two
+// toggles accumulate scratch state, nothing finalizes, then Submit records
+// the whole joined set and unblocks the ask caller.
+func TestTelegramMultiSelectAccumulatesUntilSubmit(t *testing.T) {
+	svc := testService(t, policy.Policy{Default: "ask"})
+	go svc.TelegramPump()
+	done := make(chan protocol.AskResult, 1)
+	go func() {
+		done <- svc.Ask(protocol.AskRequest{
+			Question:    "Pick colors",
+			Options:     []string{"red", "green", "blue"},
+			MultiSelect: true,
+			TTLSeconds:  30,
+		}, 1000)
+	}()
+	rid := waitForAsk(t, svc, 3*time.Second)
+
+	svc.Verdicts <- telegram.Verdict{RID: rid, Decision: "asktoggle", By: "42", Idxs: []int{0}}
+	waitForSelIdxs(t, svc, rid, []int{0})
+	svc.Verdicts <- telegram.Verdict{RID: rid, Decision: "asktoggle", By: "42", Idxs: []int{2}}
+	waitForSelIdxs(t, svc, rid, []int{0, 2})
+	svc.Verdicts <- telegram.Verdict{RID: rid, Decision: "asktoggle", By: "42", Idxs: []int{0}}
+	waitForSelIdxs(t, svc, rid, []int{2})
+	svc.Verdicts <- telegram.Verdict{RID: rid, Decision: "asktoggle", By: "42", Idxs: []int{1}}
+	waitForSelIdxs(t, svc, rid, []int{1, 2})
+
+	// No Submit yet: the blocking ask must still be waiting.
+	select {
+	case res := <-done:
+		t.Fatalf("ask finalized before submit: %+v", res)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	svc.Verdicts <- telegram.Verdict{RID: rid, Decision: "asksubmit", By: "42"}
+	select {
+	case res := <-done:
+		if res.Status != "selected" {
+			t.Fatalf("multi ask = %+v, want selected", res)
+		}
+		if res.Selection != "green, blue" {
+			t.Fatalf("joined selection = %q, want %q", res.Selection, "green, blue")
+		}
+		if len(res.SelectionIdxs) != 2 || res.SelectionIdxs[0] != 1 || res.SelectionIdxs[1] != 2 {
+			t.Fatalf("selection_idxs = %v, want [1 2]", res.SelectionIdxs)
+		}
+		if res.SelectionIdx != 0 {
+			t.Fatalf("multi SelectionIdx = %d, want 0", res.SelectionIdx)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("multi ask did not resolve after submit")
+	}
+}
+
+// TestTelegramSingleSelectStillFinalizesOnTap guards the unchanged
+// single-select contract: one "ask" callback closes the card immediately.
+func TestTelegramSingleSelectStillFinalizesOnTap(t *testing.T) {
+	svc := testService(t, policy.Policy{Default: "ask"})
+	go svc.TelegramPump()
+	done := make(chan protocol.AskResult, 1)
+	go func() {
+		done <- svc.Ask(protocol.AskRequest{
+			Question:   "Pick one",
+			Options:    []string{"red", "green"},
+			TTLSeconds: 30,
+		}, 1000)
+	}()
+	rid := waitForAsk(t, svc, 3*time.Second)
+	svc.Verdicts <- telegram.Verdict{RID: rid, Decision: "ask", By: "42", Idxs: []int{1}}
+	select {
+	case res := <-done:
+		if res.Status != "selected" || res.Selection != "green" || res.SelectionIdx != 1 {
+			t.Fatalf("single ask = %+v, want selected green idx 1", res)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("single ask did not resolve on tap")
+	}
+}
+
+// waitForSelIdxs blocks until the pending record's accumulated toggle set
+// matches want, so the concurrent pump can be observed deterministically.
+func waitForSelIdxs(t *testing.T, svc Service, rid string, want []int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		rec, err := svc.Store.Load(rid)
+		if err == nil && reflect.DeepEqual(rec.SelectedIdxs, want) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	rec, _ := svc.Store.Load(rid)
+	t.Fatalf("selected idxs never reached %v (got %v)", want, rec.SelectedIdxs)
+}
+
+// TestToggleAskRepaintsMultiSelectKeyboard proves the real Telegram path:
+// a toggle edits the inline keyboard in place with the checkbox state and
+// the current Submit count, and finalizes nothing.
+func TestToggleAskRepaintsMultiSelectKeyboard(t *testing.T) {
+	var gotMarkup string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		if strings.HasSuffix(r.URL.Path, "/editMessageReplyMarkup") {
+			gotMarkup = r.Form.Get("reply_markup")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `{"ok":true,"result":{"message_id":7,"chat":{"id":1}}}`)
+	}))
+	defer ts.Close()
+
+	dir := t.TempDir()
+	svc := New(config.Conf{StateDir: dir, Timeout: 5, BotToken: "test-token"})
+	svc.TG.BaseURL = ts.URL
+	if st := svc.getState(); st != nil {
+		st.tgClient.BaseURL = ts.URL
+	}
+	if err := svc.Store.Init(); err != nil {
+		t.Fatal(err)
+	}
+	rid := "toggle-ask-1"
+	if err := svc.Store.Save(protocol.PendingRecord{
+		Kind: "ask", Question: "q", Options: []string{"red", "green", "blue"},
+		MultiSelect: true, RecommendedIndex: 2,
+		Expires: time.Now().Add(time.Minute).Unix(),
+	}, rid); err != nil {
+		t.Fatal(err)
+	}
+	svc.Store.AttachPager(rid, "123", 7)
+
+	svc.toggleAsk(rid, 1)
+	for _, want := range []string{"ask:toggle-ask-1:t:1", "ask:toggle-ask-1:s:1", "✅", "⬜", "⭐"} {
+		if !strings.Contains(gotMarkup, want) {
+			t.Fatalf("repainted markup missing %q:\n%s", want, gotMarkup)
+		}
+	}
+	if sel := svc.Store.SelectionInfo(rid); sel != nil {
+		t.Fatalf("toggle must not finalize a selection: %+v", sel)
 	}
 }
 

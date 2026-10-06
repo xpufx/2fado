@@ -324,13 +324,18 @@ const maxAskButtonRunes = 48
 
 // AskCard renders an interactive multi-choice question petition. While
 // pending it carries the question and a link; once chosen it shows the
-// chosen option and its source. All untrusted fields are html-escaped.
-func AskCard(host, question, link, rid string, expiresIn int64, chosen bool, selection, by string) string {
+// chosen option and its source. multiSelect only adjusts the pending
+// header (the buttons carry the real toggle/submit semantics). All
+// untrusted fields are html-escaped.
+func AskCard(host, question, link, rid string, expiresIn int64, chosen bool, selection, by string, multiSelect bool) string {
 	q := question
 	if r := []rune(q); len(r) > maxAskQuestionRunes {
 		q = string(r[:maxAskQuestionRunes]) + "…[truncated]"
 	}
 	head := "❓ <b>Question — pick one</b>"
+	if multiSelect {
+		head = "❓ <b>Question — pick one or more</b>"
+	}
 	if chosen {
 		head = fmt.Sprintf("✅ <b>Chosen: %s</b>", html.EscapeString(selection))
 	} else if by != "" && by != "client" {
@@ -349,31 +354,47 @@ func AskCard(host, question, link, rid string, expiresIn int64, chosen bool, sel
 	return fmt.Sprintf("%s\n🕒 expires in %ds · ask %s", card, expiresIn, spillID(html.EscapeString(rid)))
 }
 
-// AskButtons builds the inline keyboard for an ask card: one callback
-// button per option, data "ask:<rid>:<idx>". RecommendedIndex marks one
-// option with a star (best-effort highlight; -1 or out of range = none).
-// When multiSelect is true, the operator can select multiple options.
-//
-// The verdict data format for multi-select is "ask:<rid>:idx1,idx2"
-// (comma-separated indices).
-func AskButtons(rid string, options []string, recommended int, multiSelect bool) string {
-	rows := make([][]InlineButton, 0, len(options))
+// AskButtons builds the inline keyboard for an ask card. Single-select
+// renders data "ask:<rid>:<idx>" and one tap finalizes. Multi-select
+// renders each option as a checkbox toggle ("ask:<rid>:t:<idx>") plus an
+// explicit Submit row ("ask:<rid>:s:<n>", n = current selection count), so
+// taps accumulate until the operator confirms. selected lists the
+// currently toggled indices; RecommendedIndex marks one option with a star
+// (best-effort highlight; -1 or out of range = none).
+func AskButtons(rid string, options []string, recommended int, multiSelect bool, selected []int) string {
+	chosen := make(map[int]bool, len(selected))
+	for _, i := range selected {
+		chosen[i] = true
+	}
+	rows := make([][]InlineButton, 0, len(options)+1)
 	for i, opt := range options {
-		label := fmt.Sprintf("%d. %s", i+1, opt)
+		label := ""
+		if multiSelect {
+			if chosen[i] {
+				label = "✅ "
+			} else {
+				label = "⬜ "
+			}
+		}
+		if i == recommended {
+			label += "⭐ "
+		}
+		label += fmt.Sprintf("%d. %s", i+1, opt)
 		if r := []rune(label); len(r) > maxAskButtonRunes {
 			label = string(r[:maxAskButtonRunes]) + "…"
 		}
-		if i == recommended {
-			label = "⭐ " + label
+		data := "ask:" + rid + ":" + strconv.Itoa(i)
+		if multiSelect {
+			data = "ask:" + rid + ":t:" + strconv.Itoa(i)
 		}
+		rows = append(rows, []InlineButton{{Text: label, Data: data}})
+	}
+	if multiSelect {
 		rows = append(rows, []InlineButton{{
-			Text: label,
-			Data: "ask:" + rid + ":" + strconv.Itoa(i),
+			Text: "✅ Submit answer",
+			Data: "ask:" + rid + ":s:" + strconv.Itoa(len(chosen)),
 		}})
 	}
-	// For multi-select, we could add a "Submit" or "Done" button,
-	// but the basic format remains the same: each button press
-	// records a single index, and the system accumulates selections.
 	kb, _ := json.Marshal(Keyboard{Buttons: rows})
 	return string(kb)
 }
@@ -498,6 +519,17 @@ func (c Client) Edit(chatID string, msgID int64, text, markup string) {
 	})
 }
 
+// EditMarkup replaces only the inline keyboard on a posted card, leaving
+// the text intact. Multi-select toggles use it to repaint checkmarks
+// without rewriting the whole card.
+func (c Client) EditMarkup(chatID string, msgID int64, markup string) {
+	_, _ = c.call("editMessageReplyMarkup", url.Values{
+		"chat_id":      {chatID},
+		"message_id":   {strconv.FormatInt(msgID, 10)},
+		"reply_markup": {markup},
+	})
+}
+
 // EmptyButtons strips all buttons (final states).
 func EmptyButtons() string {
 	empty, _ := json.Marshal(Keyboard{Buttons: [][]InlineButton{}})
@@ -570,6 +602,13 @@ func (c Client) Poll(ctx context.Context, offset int64, approvers map[string]boo
 				c.answer(u.Callback.ID, "not authorized")
 				continue
 			}
+			// An empty multi-select Submit is non-binding: the operator
+			// toggled everything off, so keep the card live and say so
+			// instead of forwarding a decision the pump must ignore.
+			if kind == "asksubmit" && (len(idxs) == 0 || idxs[0] == 0) {
+				c.answer(u.Callback.ID, "select at least one")
+				continue
+			}
 			select {
 			case out <- Verdict{RID: rid, Decision: kind, By: by, Idxs: idxs}:
 			case <-ctx.Done():
@@ -581,6 +620,10 @@ func (c Client) Poll(ctx context.Context, offset int64, approvers map[string]boo
 			case "ack":
 				c.answer(u.Callback.ID, "acknowledged")
 			case "ask":
+				c.answer(u.Callback.ID, "answer recorded")
+			case "asktoggle":
+				c.answer(u.Callback.ID, "selection updated")
+			case "asksubmit":
 				c.answer(u.Callback.ID, "answer recorded")
 			case "page":
 				if len(idxs) > 0 {
@@ -599,27 +642,40 @@ func (c Client) Poll(ctx context.Context, offset int64, approvers map[string]boo
 func splitVerdict(data string) (kind, rid string, idxs []int, ok bool) {
 	if strings.HasPrefix(data, "ask:") {
 		rest := strings.TrimPrefix(data, "ask:")
-		i := strings.LastIndex(rest, ":")
-		if i <= 0 || i == len(rest)-1 {
+		// RID is opaque hex; the first colon separates it from the tail.
+		sep := strings.Index(rest, ":")
+		if sep <= 0 {
 			return "", "", nil, false
 		}
-		indexPart := rest[i+1:]
-		if indexPart == "" {
-			return "", "", nil, false
-		}
-		parts := strings.Split(indexPart, ",")
-		idxs = make([]int, 0, len(parts))
-		for _, p := range parts {
-			n, err := strconv.Atoi(strings.TrimSpace(p))
+		rid, tail := rest[:sep], rest[sep+1:]
+		switch {
+		case strings.HasPrefix(tail, "t:"):
+			n, err := strconv.Atoi(strings.TrimPrefix(tail, "t:"))
 			if err != nil || n < 0 {
 				return "", "", nil, false
 			}
-			idxs = append(idxs, n)
+			return "asktoggle", rid, []int{n}, true
+		case strings.HasPrefix(tail, "s:"):
+			n, err := strconv.Atoi(strings.TrimPrefix(tail, "s:"))
+			if err != nil || n < 0 {
+				return "", "", nil, false
+			}
+			return "asksubmit", rid, []int{n}, true
+		default:
+			parts := strings.Split(tail, ",")
+			idxs = make([]int, 0, len(parts))
+			for _, p := range parts {
+				n, err := strconv.Atoi(strings.TrimSpace(p))
+				if err != nil || n < 0 {
+					return "", "", nil, false
+				}
+				idxs = append(idxs, n)
+			}
+			if len(idxs) == 0 {
+				return "", "", nil, false
+			}
+			return "ask", rid, idxs, true
 		}
-		if len(idxs) == 0 {
-			return "", "", nil, false
-		}
-		return "ask", rest[:i], idxs, true
 	}
 	if strings.HasPrefix(data, "page:") {
 		rest := strings.TrimPrefix(data, "page:")

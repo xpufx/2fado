@@ -173,15 +173,27 @@ func (s Store) AckInfo(rid string) *protocol.AckRecord {
 // first selection wins. Only valid on existing ask-kind records; other
 // kinds and unknown IDs are rejected.
 func (s Store) Select(rid, selection string, idx int, by string) bool {
+	return s.selectRecord(rid, selection, idx, nil, by)
+}
+
+// SelectMany writes a multi-select ask answer exactly once (O_EXCL):
+// selection is the joined option labels and idxs every chosen index. The
+// single Select remains the one-index path; first answer still wins.
+func (s Store) SelectMany(rid, selection string, idxs []int, by string) bool {
+	return s.selectRecord(rid, selection, 0, idxs, by)
+}
+
+func (s Store) selectRecord(rid, selection string, idx int, idxs []int, by string) bool {
 	rec, err := s.Load(rid)
 	if err != nil || rec.Kind != "ask" {
 		return false
 	}
 	data, err := json.Marshal(protocol.SelectionRecord{
-		Selection:    selection,
-		SelectionIdx: idx,
-		By:           by,
-		UnixNano:     time.Now().UnixNano(),
+		Selection:     selection,
+		SelectionIdx:  idx,
+		SelectionIdxs: idxs,
+		By:            by,
+		UnixNano:      time.Now().UnixNano(),
 	})
 	if err != nil {
 		return false
@@ -196,6 +208,19 @@ func (s Store) Select(rid, selection string, idx int, by string) bool {
 		return false
 	}
 	return f.Sync() == nil
+}
+
+// SetSelectedIdxs records the in-progress multi-select toggle set on a
+// pending ask. It is non-binding scratch state that only feeds card
+// re-rendering; SelectMany is what finalizes the answer. Rejected for
+// non-ask and single-select records.
+func (s Store) SetSelectedIdxs(rid string, idxs []int) bool {
+	rec, err := s.Load(rid)
+	if err != nil || rec.Kind != "ask" || !rec.MultiSelect {
+		return false
+	}
+	rec.SelectedIdxs = idxs
+	return s.Save(rec, rid) == nil
 }
 
 // SelectionInfo returns the recorded ask choice for a petition, if any.

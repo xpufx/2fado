@@ -104,10 +104,10 @@ type AckResponse struct {
 // AskRequest asks the daemon to create an interactive multi-choice
 // question petition: the operator picks one of Options. Link is an
 // optional context URL; TTLSeconds overrides the default TTL (0 =
-// default). MultiSelect, AllowWriteIn, and RecommendedIndex are part of
-// the wire schema from day one so the full ask_question matrix can land
-// later without a data migration; the MVP transports persist them but
-// render single-select only. RecommendedIndex is 1-based, 0 = none.
+// default). MultiSelect renders Telegram option buttons as toggles with
+// an explicit Submit; AllowWriteIn is persisted for socket consumers that
+// accept free-text (the Telegram surface has no text capture yet).
+// RecommendedIndex is 1-based, 0 = none.
 type AskRequest struct {
 	Question         string   `json:"question"`
 	Options          []string `json:"options"`
@@ -120,15 +120,18 @@ type AskRequest struct {
 
 // AskResult is the daemon's final answer to an ask petition. Status is
 // selected (Selection set) | timeout | denied. ID names the petition;
-// SelectionIdx is the chosen option index, By names the operator channel.
+// SelectionIdx is the chosen option index for single-select, SelectionIdxs
+// carries every chosen index for multi-select (SelectionIdx stays 0), and
+// By names the operator channel.
 type AskResult struct {
-	Status       string `json:"status"`
-	ID           string `json:"id,omitempty"`
-	Question     string `json:"question,omitempty"`
-	Selection    string `json:"selection,omitempty"`
-	SelectionIdx int    `json:"selection_idx,omitempty"`
-	By           string `json:"by,omitempty"`
-	Reason       string `json:"reason,omitempty"`
+	Status        string `json:"status"`
+	ID            string `json:"id,omitempty"`
+	Question      string `json:"question,omitempty"`
+	Selection     string `json:"selection,omitempty"`
+	SelectionIdx  int    `json:"selection_idx,omitempty"`
+	SelectionIdxs []int  `json:"selection_idxs,omitempty"`
+	By            string `json:"by,omitempty"`
+	Reason        string `json:"reason,omitempty"`
 }
 
 // SelectRequest submits an option choice for an interactive ask petition.
@@ -531,6 +534,7 @@ type PendingRecord struct {
 	PageLines        []string          `json:"page_lines,omitempty"`
 	Selection        string            `json:"selection,omitempty"`
 	SelectionIdx     int               `json:"selection_idx,omitempty"`
+	SelectedIdxs     []int             `json:"selected_idxs,omitempty"`
 	Git              *GitPin           `json:"git,omitempty"`
 	FD               *FDPin            `json:"fd,omitempty"`
 	Seal             *SealPin          `json:"seal,omitempty"`
@@ -552,14 +556,16 @@ type VerdictRecord struct {
 }
 
 // SelectionRecord is written once, atomically (O_EXCL): the first ask
-// option pick wins. Selection is the verbatim option text chosen and
-// SelectionIdx its index in the petition's option list; By names the
-// operator channel (e.g. "telegram:<id>").
+// option pick wins. Selection is the verbatim option text chosen (joined
+// labels for multi-select) and SelectionIdx its index in the petition's
+// option list; multi-select also records every chosen index in
+// SelectionIdxs. By names the operator channel (e.g. "telegram:<id>").
 type SelectionRecord struct {
-	Selection    string `json:"selection"`
-	SelectionIdx int    `json:"selection_idx"`
-	By           string `json:"by"`
-	UnixNano     int64  `json:"unix_nano"`
+	Selection     string `json:"selection"`
+	SelectionIdx  int    `json:"selection_idx"`
+	SelectionIdxs []int  `json:"selection_idxs,omitempty"`
+	By            string `json:"by"`
+	UnixNano      int64  `json:"unix_nano"`
 }
 
 // CancelRecord is written once, atomically (O_EXCL): one cancel wins.

@@ -1318,12 +1318,38 @@ func (s Service) TelegramPump() {
 			}
 			continue
 		}
+		if v.Decision == "asktoggle" {
+			if len(v.Idxs) > 0 {
+				s.toggleAsk(v.RID, v.Idxs[0])
+			}
+			continue
+		}
+		if v.Decision == "asksubmit" {
+			s.submitAsk(v.RID, cleanBy("telegram:"+v.By))
+			continue
+		}
 		if v.Decision == "ask" {
 			rec, err := s.Store.Load(v.RID)
-			if err != nil || len(v.Idxs) == 0 || v.Idxs[0] >= len(rec.Options) {
+			if err != nil || len(v.Idxs) == 0 {
 				continue
 			}
-			s.Store.Select(v.RID, rec.Options[v.Idxs[0]], v.Idxs[0], cleanBy("telegram:"+v.By))
+			labels := make([]string, 0, len(v.Idxs))
+			valid := make([]int, 0, len(v.Idxs))
+			for _, i := range v.Idxs {
+				if i < 0 || i >= len(rec.Options) {
+					continue
+				}
+				labels = append(labels, rec.Options[i])
+				valid = append(valid, i)
+			}
+			if len(labels) == 0 {
+				continue
+			}
+			if len(valid) == 1 {
+				s.Store.Select(v.RID, labels[0], valid[0], cleanBy("telegram:"+v.By))
+			} else {
+				s.Store.SelectMany(v.RID, strings.Join(labels, ", "), valid, cleanBy("telegram:"+v.By))
+			}
 			continue
 		}
 		if v.Decision == "cancel" || v.Decision == "cancelled" {

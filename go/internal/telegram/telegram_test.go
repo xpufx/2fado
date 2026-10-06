@@ -192,7 +192,7 @@ func TestCardsCollapseLongBodiesAndKeepEscaping(t *testing.T) {
 	cards := map[string]string{
 		"card":   Card("h", []string{"echo", evil}, 1000, "/tmp", "rid", 60, "", "", false, 0),
 		"notify": NotifyCard("h", "https://example.com/x", evil, "rid", 60, false, ""),
-		"ask":    AskCard("h", evil, "", "rid", 60, false, "", ""),
+		"ask":    AskCard("h", evil, "", "rid", 60, false, "", "", false),
 	}
 	for name, card := range cards {
 		if strings.Contains(card, "<b>x</b>") {
@@ -214,7 +214,7 @@ func TestCardsKeepShortBodiesExpanded(t *testing.T) {
 	cards := []string{
 		Card("h", []string{"echo", "hi"}, 1000, "/tmp", "rid", 60, "", "", false, 0),
 		NotifyCard("h", "https://example.com/x", "short", "rid", 60, false, ""),
-		AskCard("h", "short?", "", "rid", 60, false, "", ""),
+		AskCard("h", "short?", "", "rid", 60, false, "", "", false),
 	}
 	for _, card := range cards {
 		if strings.Contains(card, "<blockquote") {
@@ -339,6 +339,86 @@ func TestSplitVerdictPage(t *testing.T) {
 	}
 	if kind, rid, idxs, ok := splitVerdict("ask:rid1:3"); !ok || kind != "ask" || rid != "rid1" || len(idxs) != 1 || idxs[0] != 3 {
 		t.Errorf("ask parse regressed: (%q,%q,%v,%v)", kind, rid, idxs, ok)
+	}
+	if kind, rid, idxs, ok := splitVerdict("ask:rid1:t:2"); !ok || kind != "asktoggle" || rid != "rid1" || len(idxs) != 1 || idxs[0] != 2 {
+		t.Errorf("asktoggle parse = (%q,%q,%v,%v)", kind, rid, idxs, ok)
+	}
+	if kind, rid, idxs, ok := splitVerdict("ask:rid1:s:0"); !ok || kind != "asksubmit" || rid != "rid1" || len(idxs) != 1 || idxs[0] != 0 {
+		t.Errorf("asksubmit parse = (%q,%q,%v,%v)", kind, rid, idxs, ok)
+	}
+	for _, bad := range []string{"ask:abc:t:x", "ask:abc:t:-1", "ask:abc:s:x", "ask:abc:s:-1", "ask::t:1", "ask::s:1"} {
+		if _, _, _, ok := splitVerdict(bad); ok {
+			t.Errorf("splitVerdict(%q) must not parse", bad)
+		}
+	}
+}
+
+func TestAskButtonsMultiSelectTogglesAndSubmit(t *testing.T) {
+	if card := AskCard("h", "q", "", "rid1", 60, false, "", "", true); !strings.Contains(card, "pick one or more") {
+		t.Fatalf("multi-select header missing:\n%s", card)
+	}
+	kb := parseKeyboard(t, AskButtons("rid1", []string{"red", "green", "blue"}, 1, true, []int{1}))
+	if len(kb.Inline) != 4 {
+		t.Fatalf("multi keyboard rows = %d, want 4 (3 options + submit)", len(kb.Inline))
+	}
+	if kb.Inline[0][0].Data != "ask:rid1:t:0" || !strings.Contains(kb.Inline[0][0].Text, "⬜") {
+		t.Fatalf("unselected toggle = %+v", kb.Inline[0][0])
+	}
+	if kb.Inline[1][0].Data != "ask:rid1:t:1" || !strings.Contains(kb.Inline[1][0].Text, "✅") || !strings.Contains(kb.Inline[1][0].Text, "⭐") {
+		t.Fatalf("selected/recommended toggle = %+v", kb.Inline[1][0])
+	}
+	if kb.Inline[3][0].Data != "ask:rid1:s:1" {
+		t.Fatalf("submit button = %+v, want ask:rid1:s:1", kb.Inline[3][0])
+	}
+	// Single-select stays one row per option, no checkbox and no submit.
+	single := parseKeyboard(t, AskButtons("rid1", []string{"a", "b"}, -1, false, nil))
+	if len(single.Inline) != 2 || single.Inline[0][0].Data != "ask:rid1:0" || strings.Contains(single.Inline[0][0].Text, "⬜") {
+		t.Fatalf("single keyboard = %+v", single.Inline)
+	}
+}
+
+func TestPollHoldsEmptyMultiSelectSubmit(t *testing.T) {
+	var updates int32
+	answered := make(chan string, 1)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		if strings.HasSuffix(r.URL.Path, "/answerCallbackQuery") {
+			select {
+			case answered <- r.Form.Get("text"):
+			default:
+			}
+			fmt.Fprintln(w, `{"ok":true}`)
+			return
+		}
+		if atomic.AddInt32(&updates, 1) == 1 {
+			fmt.Fprintln(w, `{"ok":true,"result":[{"update_id":1,"callback_query":{"id":"cb1","from":{"id":123},"data":"ask:rid9:s:0"}}]}`)
+			return
+		}
+		<-r.Context().Done()
+	}))
+	defer ts.Close()
+
+	client := New("poll-token")
+	client.BaseURL = ts.URL
+	defer client.HTTP.CloseIdleConnections()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	out := make(chan Verdict, 1)
+	go client.Poll(ctx, 0, map[string]bool{"123": true}, out, func(int64) {})
+
+	select {
+	case v := <-out:
+		t.Fatalf("empty submit must not forward a verdict: %+v", v)
+	case <-time.After(500 * time.Millisecond):
+	}
+	select {
+	case text := <-answered:
+		if text != "select at least one" {
+			t.Errorf("empty submit ack = %q, want %q", text, "select at least one")
+		}
+	case <-time.After(time.Second):
+		t.Error("empty submit callback not answered")
 	}
 }
 

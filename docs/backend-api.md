@@ -17,7 +17,7 @@ Privilege escalation is disabled in the default build and no escalation features
 - Output: `{items: [{id, argv, host, caller, cwd, asUid, expiresIn, step: initial|confirm (default initial), confirmOf?, kind?, link?, summary?, question?, options?, selection?, selectionIdx?, acked?, ackBy?, authUrl?, preview?}]}`.
 - Server: sends `{list:{}}`, camelCases daemon `PendingList`, sets `host=os.hostname()`, `caller=String(uid)`. Fail-soft: `{items:[]}` + `log.warn`.
 - Client: polls every 3s (`POLL_MS`); toast per new id; `kind==="notify"` renders Ack-only cards (no argv); `kind==="ask"` renders interactive choice cards with options; `step==="confirm"` renders danger styling + `confirmOf` dedup against Recent.
-  - *Ask multi-select & write-in status (#74)*: Protocol fields `multi_select` and `allow_write_in` are preserved on petition/selection structures for schema compatibility. In current reference daemon builds, interactive questions evaluate single option selections (`selection_idx` / `selection`); multi-select aggregation and write-in validation are deferred.
+  - *Ask multi-select & write-in status (#74)*: `multi_select` and `allow_write_in` are preserved on petition/selection structures. Telegram multi-select now renders option buttons as toggles plus an explicit **Submit answer** button: taps accumulate on the petition, and only Submit records the answer (all chosen option labels joined with `", "`, with every index preserved in the selection's `selection_idxs` and returned on `AskResult.selection_idxs`). Single-select remains one-tap-to-close. `allow_write_in` is still socket-only: the Telegram surface has no free-text capture, so it is persisted and available to other consumers but not rendered in Telegram. `approval.select` continues to accept a single pre-joined `selection` string (as the Paseo surface submits it).
 
 ## `approval.verdict` — approve / deny
 
@@ -30,7 +30,7 @@ Privilege escalation is disabled in the default build and no escalation features
 
 - Input: `{id (min 1), selection (string), selectionIdx?: number, socketPath?}`.
 - Output: `{selected: boolean, error?: string}`.
-- Server: sends `{select:{id,selection,selection_idx}}`. Records chosen option for an active `kind="ask"` petition via atomic store write, unblocking the waiting `ask` caller immediately. First selection wins. Missing input → `{selected:false, error:"missing id or selection"}`. Rejections/already selected → `{selected:false, error:"selection rejected"}`.
+- Server: sends `{select:{id,selection,selection_idx,write_in?,by?}}`. Records the chosen option for an active `kind="ask"` petition via atomic store write, unblocking the waiting `ask` caller immediately. First selection wins. A multi-select answer is submitted as one pre-joined `selection` string (labels joined with `", "`); the Telegram pump writes the individual indices to the selection's `selection_idxs`. Missing input → `{selected:false, error:"missing id or selection"}`. Rejections/already selected → `{selected:false, error:"selection rejected"}`.
 
 ## `approval.cancel` — explicit cancellation
 
