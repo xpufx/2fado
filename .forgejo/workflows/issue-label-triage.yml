@@ -1,6 +1,6 @@
 # Human-activity triage: when a person (not the shared `xpufx` agent identity)
 # opens an issue or posts an issue comment, make sure the exclusive
-# `attention/0-orchestrator` label is the effective attention signal.
+# `attention/orchestrator` label is the effective attention signal.
 #
 # Why a host-mode runner: this is a handful of wget calls, so there is no
 # reason to pay for a container image to be pulled/started. A runner registered
@@ -31,19 +31,17 @@
 #   job no-ops (exits 0) when the actor is `xpufx`.
 #
 # Exclusive-label logic
-#   `attention/*` labels are `exclusive: true` in
-#   `plugins/forges/examples/labels/label-base.yaml`, so the Forgejo DB evicts
-#   any other `attention/*` label the moment a new one is added. This workflow
-#   therefore only ADDS `attention/0-orchestrator` (via
+#   `attention/*` labels are `exclusive: true`, so the Forgejo DB evicts any
+#   other `attention/*` label the moment a new one is added. This workflow
+#   therefore only ADDS `attention/orchestrator` (via
 #   `POST /repos/{owner}/{repo}/issues/{n}/labels`) and lets the scope
-#   exclusivity evict `attention/1-agent`, `attention/2-user`, or
-#   `attention/3-ignore`. It does not touch any other scope.
+#   exclusivity evict other attention labels. It does not touch any other scope.
 #
 # Idempotence / loops
-#   No-ops when `attention/0-orchestrator` is already present. The workflow only
-#   writes a label (never a comment or a new issue), and adding a label emits an
-#   `issues:labeled` event, which is not a trigger here, so it cannot re-trigger
-#   itself.
+#   No-ops when `attention/orchestrator` or `attention/0-orchestrator` is already
+#   present. The workflow only writes a label (never a comment or a new issue),
+#   and adding a label emits an `issues:labeled` event, which is not a trigger
+#   here, so it cannot re-trigger itself.
 name: Issue label triage (host runner)
 
 on:
@@ -54,10 +52,10 @@ on:
 
 jobs:
   triage:
-    name: Ensure attention/0-orchestrator for human activity
+    name: Ensure attention/orchestrator for human activity
     runs-on: runner-local-shell # host runner label; no container
     steps:
-      - name: Set attention/0-orchestrator (human only)
+      - name: Set attention/orchestrator (human only)
         env:
           # Forgejo auto-injects the run's own task token under these names; it
           # carries write access to this repository.
@@ -94,6 +92,19 @@ jobs:
             wget -q -O - --header "$auth_header" "$1"
           }
 
+          api_post() {
+            wget -q -O - --post-data "$2" \
+              --header "$auth_header" --header "Content-Type: application/json" "$1"
+          }
+
+          has_label() {
+            if [ "$have_jq" = 1 ]; then
+              printf '%s' "$1" | jq -e --arg label "$2" 'any(.[]; .name == $label)' >/dev/null
+            else
+              printf '%s' "$1" | grep -Fq "\"name\":\"$2\"" || printf '%s' "$1" | grep -Fq "\"name\": \"$2\""
+            fi
+          }
+
           # True when the issue object carries a non-null `pull_request` (i.e.
           # the event is for a PR). Forgejo omits the field entirely for real
           # issues, so its presence as an object is authoritative.
@@ -102,15 +113,6 @@ jobs:
               printf '%s' "$1" | jq -r '.pull_request != null' | grep -q '^true$'
             else
               printf '%s' "$1" | grep -Eq '"pull_request"[[:space:]]*:[[:space:]]*\{'
-            fi
-          }
-
-          # True when the labels array contains the label name.
-          has_orchestrator_label() {
-            if [ "$have_jq" = 1 ]; then
-              printf '%s' "$1" | jq -r 'any(.[]; .name == "attention/0-orchestrator")' | grep -q '^true$'
-            else
-              printf '%s' "$1" | grep -Eq '"name"[[:space:]]*:[[:space:]]*"attention/0-orchestrator"'
             fi
           }
 
@@ -127,10 +129,34 @@ jobs:
             exit 0
           fi
 
-          # Already triaged: `attention/0-orchestrator` is present, no-op.
           labels_json="$(api_get "${API_URL}/repos/${REPO}/issues/${ISSUE}/labels")"
-          if has_orchestrator_label "$labels_json"; then
-            echo "issue #${ISSUE} already has attention/0-orchestrator; nothing to do"
+
+          # stop-work is a hard circuit breaker, including for SOS. SOS can
+          # otherwise break through completed/ignored terminal states, matching
+          # the board's emergency precedence. Triage never changes state/* or
+          # review/*, so an active review or lifecycle transition is preserved.
+          if has_label "$labels_json" "flag/stop-work"; then
+            echo "stop-work is set; skipping"
+            exit 0
+          fi
+
+          sos=0
+          if has_label "$labels_json" "priority/0-SOS" || has_label "$labels_json" "priority/0-sos" || has_label "$labels_json" "priority/sos"; then
+            sos=1
+          fi
+
+          if [ "$sos" = 0 ]; then
+            for terminal in flag/wont-do state/4-done state/done attention/3-ignore attention/2-ignore attention/ignore confirmed-done; do
+              if has_label "$labels_json" "$terminal"; then
+                echo "terminal label $terminal is set; skipping"
+                exit 0
+              fi
+            done
+          fi
+
+          # Already triaged: `attention/orchestrator` or `attention/0-orchestrator` is present, no-op.
+          if has_label "$labels_json" "attention/orchestrator" || has_label "$labels_json" "attention/0-orchestrator"; then
+            echo "issue #${ISSUE} already has attention/orchestrator; nothing to do"
             exit 0
           fi
 
@@ -138,16 +164,14 @@ jobs:
           # evicts whatever attention label is currently set. An HTTP error here
           # may or may not set a nonzero exit status, so the write is verified by
           # re-reading the labels below rather than trusting the exit code.
-          echo "human actor '${ACTOR}' on issue #${ISSUE}: setting attention/0-orchestrator"
-          wget -q -O - --post-data '{"labels":["attention/0-orchestrator"]}' \
-            --header "$auth_header" --header "Content-Type: application/json" \
-            "${API_URL}/repos/${REPO}/issues/${ISSUE}/labels" >/dev/null
+          echo "human actor '${ACTOR}' on issue #${ISSUE}: setting attention/orchestrator"
+          api_post "${API_URL}/repos/${REPO}/issues/${ISSUE}/labels" '{"labels":["attention/orchestrator"]}' >/dev/null
 
           # Confirm the write landed (and that the label is defined on the repo);
-          # a silent drop would otherwise leave the board's signal wrong.
+          # accept either numberless or legacy numeric if repo hasn't synced yet.
           labels_json="$(api_get "${API_URL}/repos/${REPO}/issues/${ISSUE}/labels")"
-          if ! has_orchestrator_label "$labels_json"; then
-            echo "::error::attention/0-orchestrator was not applied to issue #${ISSUE} (is the label defined on the repo?)"
+          if ! (has_label "$labels_json" "attention/orchestrator" || has_label "$labels_json" "attention/0-orchestrator"); then
+            echo "::error::attention/orchestrator was not applied to issue #${ISSUE} (is the label defined on the repo?)"
             exit 1
           fi
-          echo "issue #${ISSUE}: attention/0-orchestrator set"
+          echo "issue #${ISSUE}: attention/orchestrator set"

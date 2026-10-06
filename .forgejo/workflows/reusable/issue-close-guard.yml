@@ -165,7 +165,7 @@ jobs:
           # Post policy enforcement comment on the reopened issue
           # -------------------------------------------------------------------------
           echo "posting policy clarification comment on issue #${ISSUE}..."
-          comment_body=$(printf '> [!WARNING]\n> **Automated Reopen**: Issue #%s was closed by `@%s` and has been automatically reopened per repository governance policy.\n\n**Policy Directive**:\nAutonomous agents and orchestrators must **never** close issues directly. Upon completing implementation and local verification, agents must transition tickets to `state/2-review` or `state/3-verify` with an envelope report and await operator verification. Only the human operator closes issues upon final review (`confirmed-done`). Do not repeat this closure.' "$ISSUE" "$ACTOR")
+          comment_body=$(printf '> [!WARNING]\n> **Automated Reopen**: Issue #%s was closed by `@%s` and has been automatically reopened per repository governance policy.\n\n**Policy Directive**:\nAutonomous agents and orchestrators must **never** close issues directly. Upon completing implementation and local verification, agents must transition tickets to `state/review` or `state/verify` with an envelope report and await operator verification. Only the human operator closes issues upon final review (`confirmed-done`). Do not repeat this closure.' "$ISSUE" "$ACTOR")
 
           comment_payload=""
           if command -v jq >/dev/null 2>&1; then

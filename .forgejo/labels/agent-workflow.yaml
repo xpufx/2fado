@@ -1,31 +1,30 @@
 # Forgejo Scoped & Exclusive Labels Definition
 # Compatible with Forgejo label templates & REST API
-# Numeric prefixes enforce natural lexicographical ordering in Forgejo UI
 labels:
   # ============================================================================
   # Priority Scope (Mutually Exclusive - Ordered by Urgency)
   # ============================================================================
-  - name: "priority/0-SOS"
+  - name: "priority/sos"
     color: "#b60205"
     exclusive: true
     description: "Highest priority urgent dispatch; preempts all standard tasks"
 
-  - name: "priority/1-high"
+  - name: "priority/high"
     color: "#d93f0b"
     exclusive: true
     description: "High priority task"
 
-  - name: "priority/2-normal"
+  - name: "priority/normal"
     color: "#0e8a16"
     exclusive: true
     description: "Normal priority task"
 
-  - name: "priority/3-low"
+  - name: "priority/low"
     color: "#808080"
     exclusive: true
     description: "Low priority task"
 
-  - name: "priority/4-backburner"
+  - name: "priority/backburner"
     color: "#8a8a8a"
     exclusive: true
     description: "Parked or low-priority background item"
@@ -33,45 +32,63 @@ labels:
   # ============================================================================
   # Execution State Scope (Mutually Exclusive - Ordered by Lifecycle Pipeline)
   # ============================================================================
-  - name: "state/0-triage"
+  - name: "state/triage"
     color: "#fbca04"
     exclusive: true
     description: "New issue awaiting initial triage"
 
-  - name: "state/1-wip"
+  - name: "state/wip"
     color: "#e11d48"
     exclusive: true
     description: "Active implementation in progress"
 
-  - name: "state/2-review"
+  - name: "state/review"
     color: "#7057ff"
     exclusive: true
-    description: "Implementation complete and verified locally; awaiting Orchestrator review"
+    description: "Awaiting operator verdict: review/approved advances to state/verify, review/changes-requested returns to state/wip"
 
-  - name: "state/3-verify"
+  - name: "state/verify"
     color: "#0075ca"
     exclusive: true
-    description: "Awaiting human operator or on-device test verification"
+    description: "Awaiting human operator signoff or live device verification"
 
-  - name: "state/4-done"
+  - name: "state/done"
     color: "#006b75"
     exclusive: true
     description: "Final acceptance confirmed"
 
   # ============================================================================
+  # Review Scope (Mutually Exclusive - Granular Code Review Status)
+  # ============================================================================
+  - name: "review/needed"
+    color: "#7057ff"
+    exclusive: true
+    description: "Code complete and committed; awaiting Orchestrator diff audit"
+
+  - name: "review/changes-requested"
+    color: "#e11d48"
+    exclusive: true
+    description: "Operator verdict: flaws found; agent returns issue to state/wip"
+
+  - name: "review/approved"
+    color: "#0e8a16"
+    exclusive: true
+    description: "Operator verdict: approved; agent advances issue to state/verify"
+
+  # ============================================================================
   # Specification & Shaping Scope (Mutually Exclusive - Ordered by Stage)
   # ============================================================================
-  - name: "spec/0-needed"
+  - name: "spec/needed"
     color: "#d4a017"
     exclusive: true
     description: "Needs pre-code technical specification or boundary analysis"
 
-  - name: "spec/1-checklist"
+  - name: "spec/checklist"
     color: "#1d76db"
     exclusive: true
     description: "Actionable - [ ] checklist shaped and ready for human review"
 
-  - name: "spec/2-approved"
+  - name: "spec/approved"
     color: "#0e8a16"
     exclusive: true
     description: "Specification and checklist approved for implementation"
@@ -79,12 +96,12 @@ labels:
   # ============================================================================
   # Presentation & Formatting Scope (Mutually Exclusive)
   # ============================================================================
-  - name: "format/0-needed"
+  - name: "format/needed"
     color: "#1d76db"
     exclusive: true
     description: "Issue body requires markdown or typo cleanup without changing intent"
 
-  - name: "format/1-ok"
+  - name: "format/ok"
     color: "#0e8a16"
     exclusive: true
     description: "Issue presentation and formatting verified clean"
@@ -92,35 +109,40 @@ labels:
   # ============================================================================
   # Size / Effort Scope (Mutually Exclusive - Ordered by Weight)
   # ============================================================================
-  - name: "size/0-cheap"
+  - name: "size/cheap"
     color: "#c2e0c6"
     exclusive: true
     description: "Small, low-risk task safe for autonomous worker dispatch"
 
-  - name: "size/1-medium"
+  - name: "size/medium"
     color: "#fef2c0"
     exclusive: true
     description: "Standard sprint task with defined scope"
 
-  - name: "size/2-expensive"
+  - name: "size/expensive"
     color: "#f9d0c4"
     exclusive: true
     description: "High cognitive load, broad refactor, or multi-package change"
 
+  - name: "size/chunk"
+    color: "#e11d48"
+    exclusive: true
+    description: "Oversized scope; halt implementation and chunk into smaller PRs/tickets"
+
   # ============================================================================
   # Upstream Scope (Mutually Exclusive - Ordered by Status)
   # ============================================================================
-  - name: "upstream/0-explore"
+  - name: "upstream/explore"
     color: "#5319e7"
     exclusive: true
     description: "Investigate upstream Paseo core repos, PRs, and docs before coding"
 
-  - name: "upstream/1-blocked"
+  - name: "upstream/blocked"
     color: "#880e4f"
     exclusive: true
     description: "Hard dependency blocked on an upstream Paseo release or fix"
 
-  - name: "upstream/2-aligned"
+  - name: "upstream/aligned"
     color: "#0e8a16"
     exclusive: true
     description: "Verified aligned and compatible with upstream Paseo"
@@ -128,20 +150,30 @@ labels:
   # ============================================================================
   # Attention Scope (Mutually Exclusive - Ordered by Urgency)
   # ============================================================================
-  - name: "attention/0-agent"
+  - name: "attention/orchestrator"
+    color: "#1d76db"
+    exclusive: true
+    description: "Requires Orchestrator triage, decomposition, or dispatch"
+
+  - name: "attention/agent"
     color: "#0e8a16"
     exclusive: true
-    description: "Active signal for agent inspection or pickup"
+    description: "Active signal for autonomous worker agent inspection or pickup"
 
-  - name: "attention/1-user"
+  - name: "attention/user"
     color: "#b60205"
     exclusive: true
     description: "Blocked on human operator clarification"
 
-  - name: "attention/2-ignore"
+  - name: "attention/ignore"
     color: "#6b7280"
     exclusive: true
     description: "Suppresses automated agent triage unless escalated with SOS"
+
+  - name: "attention/frontdesk"
+    color: "#e99695"
+    exclusive: true
+    description: "Operator dispatch or escalation requiring Front Desk fleet management"
 
   # ============================================================================
   # Kind / Nature Scope (Mutually Exclusive)
@@ -224,6 +256,11 @@ labels:
     exclusive: true
     description: "Concerns root workspace or cross-cutting configuration"
 
+  - name: "target/daemon"
+    color: "#2f363d"
+    exclusive: true
+    description: "Concerns backend daemons, system services, or socket protocols"
+
   # ============================================================================
   # Dependency Scope (Non-Exclusive to allow complex links)
   # ============================================================================
@@ -236,6 +273,24 @@ labels:
     color: "#e99695"
     exclusive: false
     description: "This issue is blocked waiting on another issue"
+
+  # ============================================================================
+  # Linked / Cluster Coordination Scope (Mutually Exclusive - Ordered by Stage)
+  # ============================================================================
+  - name: "linked/needs-split"
+    color: "#e11d48"
+    exclusive: true
+    description: "Multiple cross-cutting concerns; halt implementation and split into domain tickets"
+
+  - name: "linked/peer"
+    color: "#5319e7"
+    exclusive: true
+    description: "Part of an active cluster of co-evolving sister issues (see Linked: line)"
+
+  - name: "linked/done"
+    color: "#0e8a16"
+    exclusive: true
+    description: "All sister/peer issues merged and verified; synchronization resolved"
 
   # ============================================================================
   # Special / Behavioral Flags
